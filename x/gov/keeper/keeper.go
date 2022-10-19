@@ -27,6 +27,8 @@ type Keeper struct {
 	// The reference to the DelegationSet and ValidatorSet to get information about validators and delegators
 	sk types.StakingKeeper
 
+	protocolStakingKeeper types.ProtocolStakingKeeper
+
 	// GovHooks
 	hooks types.GovHooks
 
@@ -54,7 +56,8 @@ type Keeper struct {
 // CONTRACT: the parameter Subspace must have the param key table already initialized
 func NewKeeper(
 	cdc codec.BinaryCodec, key storetypes.StoreKey, paramSpace types.ParamSubspace,
-	authKeeper types.AccountKeeper, bankKeeper types.BankKeeper, sk types.StakingKeeper,
+	authKeeper types.AccountKeeper, bankKeeper types.BankKeeper,
+	sk types.StakingKeeper, protocolStakingKeeper types.ProtocolStakingKeeper,
 	legacyRouter v1beta1.Router, router *baseapp.MsgServiceRouter,
 	config types.Config,
 ) Keeper {
@@ -74,15 +77,16 @@ func NewKeeper(
 	}
 
 	return Keeper{
-		storeKey:     key,
-		paramSpace:   paramSpace,
-		authKeeper:   authKeeper,
-		bankKeeper:   bankKeeper,
-		sk:           sk,
-		cdc:          cdc,
-		legacyRouter: legacyRouter,
-		router:       router,
-		config:       config,
+		storeKey:              key,
+		paramSpace:            paramSpace,
+		authKeeper:            authKeeper,
+		bankKeeper:            bankKeeper,
+		sk:                    sk,
+		protocolStakingKeeper: protocolStakingKeeper,
+		cdc:                   cdc,
+		legacyRouter:          legacyRouter,
+		router:                router,
+		config:                config,
 	}
 }
 
