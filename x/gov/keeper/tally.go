@@ -93,14 +93,12 @@ func (keeper Keeper) Tally(ctx sdk.Context, proposal v1.Proposal) (passes bool, 
 					val.DelegatorDeductions = val.DelegatorDeductions.Add(amounts[idx])
 					currValidators[address] = val
 
-					votingPower := amounts[idx].Quo(val.DelegatorShares)
-
 					for _, option := range vote.Options {
 						weight, _ := sdk.NewDecFromStr(option.Weight)
-						subPower := votingPower.Mul(weight)
+						subPower := amounts[idx].Mul(weight)
 						results[option.Option] = results[option.Option].Add(subPower)
 					}
-					totalVotingPower = totalVotingPower.Add(votingPower)
+					totalVotingPower = totalVotingPower.Add(amounts[idx])
 				}
 			}
 		}
