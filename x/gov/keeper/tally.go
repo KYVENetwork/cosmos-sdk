@@ -59,7 +59,7 @@ func (keeper Keeper) Tally(ctx sdk.Context, proposal v1.Proposal) (passes bool, 
 		// Check if the voter is a KYVE Protocol validator.
 		if val, ok := currValidators[voter.String()]; ok {
 			val.Vote = vote.Options
-			currValidators[valAddrStr] = val
+			currValidators[voter.String()] = val
 		}
 
 		// iterate over all delegations from voter, deduct from any delegated-to validators
