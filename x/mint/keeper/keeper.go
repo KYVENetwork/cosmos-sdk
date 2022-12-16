@@ -13,18 +13,19 @@ import (
 
 // Keeper of the mint store
 type Keeper struct {
-	cdc              codec.BinaryCodec
-	storeKey         storetypes.StoreKey
-	paramSpace       paramtypes.Subspace
-	stakingKeeper    types.StakingKeeper
-	bankKeeper       types.BankKeeper
-	feeCollectorName string
+	cdc                   codec.BinaryCodec
+	storeKey              storetypes.StoreKey
+	paramSpace            paramtypes.Subspace
+	stakingKeeper         types.StakingKeeper
+	protocolStakingKeeper types.ProtocolStakingKeeper
+	bankKeeper            types.BankKeeper
+	feeCollectorName      string
 }
 
 // NewKeeper creates a new mint Keeper instance
 func NewKeeper(
 	cdc codec.BinaryCodec, key storetypes.StoreKey, paramSpace paramtypes.Subspace,
-	sk types.StakingKeeper, ak types.AccountKeeper, bk types.BankKeeper,
+	sk types.StakingKeeper, psk types.ProtocolStakingKeeper, ak types.AccountKeeper, bk types.BankKeeper,
 	feeCollectorName string,
 ) Keeper {
 	// ensure mint module account is set
@@ -38,12 +39,13 @@ func NewKeeper(
 	}
 
 	return Keeper{
-		cdc:              cdc,
-		storeKey:         key,
-		paramSpace:       paramSpace,
-		stakingKeeper:    sk,
-		bankKeeper:       bk,
-		feeCollectorName: feeCollectorName,
+		cdc:                   cdc,
+		storeKey:              key,
+		paramSpace:            paramSpace,
+		stakingKeeper:         sk,
+		protocolStakingKeeper: psk,
+		bankKeeper:            bk,
+		feeCollectorName:      feeCollectorName,
 	}
 }
 
@@ -91,7 +93,18 @@ func (k Keeper) StakingTokenSupply(ctx sdk.Context) math.Int {
 // BondedRatio implements an alias call to the underlying staking keeper's
 // BondedRatio to be used in BeginBlocker.
 func (k Keeper) BondedRatio(ctx sdk.Context) sdk.Dec {
-	return k.stakingKeeper.BondedRatio(ctx)
+	totalSupply := k.stakingKeeper.StakingTokenSupply(ctx)
+	if !totalSupply.IsPositive() {
+		return sdk.ZeroDec()
+	}
+
+	bondedTokens := sdk.NewDecFromInt(k.stakingKeeper.TotalBondedTokens(ctx))
+	protocolBondedTokens := sdk.ZeroDec()
+	if k.protocolStakingKeeper != nil {
+		protocolBondedTokens = sdk.NewDecFromInt(k.protocolStakingKeeper.TotalBondedTokens(ctx))
+	}
+
+	return bondedTokens.Add(protocolBondedTokens).QuoInt(totalSupply)
 }
 
 // MintCoins implements an alias call to the underlying supply keeper's
