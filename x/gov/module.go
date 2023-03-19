@@ -205,6 +205,7 @@ func ProvideModule(in GovInputs) GovOutputs {
 		in.AccountKeeper,
 		in.BankKeeper,
 		in.StakingKeeper,
+		nil,
 		in.MsgServiceRouter,
 		kConfig,
 		authority.String(),

@@ -24,6 +24,9 @@ type Keeper struct {
 	// The reference to the DelegationSet and ValidatorSet to get information about validators and delegators
 	sk types.StakingKeeper
 
+	// The reference to the Protocol DelegationSet and ValidatorSet to get information about KYVE protocol validators and delegators
+	protocolStakingKeeper types.ProtocolStakingKeeper
+
 	// GovHooks
 	hooks types.GovHooks
 
@@ -60,7 +63,7 @@ func (k Keeper) GetAuthority() string {
 // CONTRACT: the parameter Subspace must have the param key table already initialized
 func NewKeeper(
 	cdc codec.BinaryCodec, key storetypes.StoreKey, authKeeper types.AccountKeeper,
-	bankKeeper types.BankKeeper, sk types.StakingKeeper,
+	bankKeeper types.BankKeeper, sk types.StakingKeeper, psk types.ProtocolStakingKeeper,
 	router *baseapp.MsgServiceRouter, config types.Config, authority string,
 ) *Keeper {
 	// ensure governance module account is set
@@ -78,14 +81,15 @@ func NewKeeper(
 	}
 
 	return &Keeper{
-		storeKey:   key,
-		authKeeper: authKeeper,
-		bankKeeper: bankKeeper,
-		sk:         sk,
-		cdc:        cdc,
-		router:     router,
-		config:     config,
-		authority:  authority,
+		storeKey:              key,
+		authKeeper:            authKeeper,
+		bankKeeper:            bankKeeper,
+		sk:                    sk,
+		protocolStakingKeeper: psk,
+		cdc:                   cdc,
+		router:                router,
+		config:                config,
+		authority:             authority,
 	}
 }
 

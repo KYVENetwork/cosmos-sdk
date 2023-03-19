@@ -14,11 +14,12 @@ import (
 
 // Keeper of the mint store
 type Keeper struct {
-	cdc              codec.BinaryCodec
-	storeKey         storetypes.StoreKey
-	stakingKeeper    types.StakingKeeper
-	bankKeeper       types.BankKeeper
-	feeCollectorName string
+	cdc                   codec.BinaryCodec
+	storeKey              storetypes.StoreKey
+	stakingKeeper         types.StakingKeeper
+	protocolStakingKeeper types.ProtocolStakingKeeper
+	bankKeeper            types.BankKeeper
+	feeCollectorName      string
 
 	// the address capable of executing a MsgUpdateParams message. Typically, this
 	// should be the x/gov module account.
@@ -30,6 +31,7 @@ func NewKeeper(
 	cdc codec.BinaryCodec,
 	key storetypes.StoreKey,
 	sk types.StakingKeeper,
+	psk types.ProtocolStakingKeeper,
 	ak types.AccountKeeper,
 	bk types.BankKeeper,
 	feeCollectorName string,
@@ -41,12 +43,13 @@ func NewKeeper(
 	}
 
 	return Keeper{
-		cdc:              cdc,
-		storeKey:         key,
-		stakingKeeper:    sk,
-		bankKeeper:       bk,
-		feeCollectorName: feeCollectorName,
-		authority:        authority,
+		cdc:                   cdc,
+		storeKey:              key,
+		stakingKeeper:         sk,
+		protocolStakingKeeper: psk,
+		bankKeeper:            bk,
+		feeCollectorName:      feeCollectorName,
+		authority:             authority,
 	}
 }
 
@@ -113,7 +116,18 @@ func (k Keeper) StakingTokenSupply(ctx sdk.Context) math.Int {
 // BondedRatio implements an alias call to the underlying staking keeper's
 // BondedRatio to be used in BeginBlocker.
 func (k Keeper) BondedRatio(ctx sdk.Context) math.LegacyDec {
-	return k.stakingKeeper.BondedRatio(ctx)
+	totalSupply := k.StakingTokenSupply(ctx)
+	if !totalSupply.IsPositive() {
+		return sdk.ZeroDec()
+	}
+
+	bondedTokens := math.LegacyNewDecFromInt(k.stakingKeeper.TotalBondedTokens(ctx))
+	protocolBondedTokens := math.LegacyZeroDec()
+	if k.protocolStakingKeeper != nil {
+		protocolBondedTokens = math.LegacyNewDecFromInt(k.protocolStakingKeeper.TotalBondedTokens(ctx))
+	}
+
+	return bondedTokens.Add(protocolBondedTokens).QuoInt(totalSupply)
 }
 
 // MintCoins implements an alias call to the underlying supply keeper's

@@ -255,6 +255,7 @@ func ProvideModule(in MintInputs) MintOutputs {
 		in.Cdc,
 		in.Key,
 		in.StakingKeeper,
+		nil,
 		in.AccountKeeper,
 		in.BankKeeper,
 		feeCollectorName,

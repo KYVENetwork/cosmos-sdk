@@ -45,6 +45,7 @@ func (suite *MintTestSuite) SetupTest() {
 		encCfg.Codec,
 		key,
 		stakingKeeper,
+		nil,
 		accountKeeper,
 		bankKeeper,
 		authtypes.FeeCollectorName,

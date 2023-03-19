@@ -27,6 +27,14 @@ type StakingKeeper interface {
 	)
 }
 
+// ProtocolStakingKeeper expected KYVE protocol staking keeper (Protocol Validator and Delegator sets) (noalias)
+type ProtocolStakingKeeper interface {
+	GetActiveValidators(sdk.Context) []interface{}
+
+	TotalBondedTokens(sdk.Context) math.Int
+	GetDelegations(sdk.Context, string) ([]string, []math.LegacyDec)
+}
+
 // AccountKeeper defines the expected account keeper (noalias)
 type AccountKeeper interface {
 	GetAccount(ctx sdk.Context, addr sdk.AccAddress) types.AccountI

@@ -6,6 +6,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/suite"
 
+	"cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
@@ -49,6 +50,7 @@ func (s *IntegrationTestSuite) SetupTest() {
 		encCfg.Codec,
 		key,
 		stakingKeeper,
+		nil,
 		accountKeeper,
 		bankKeeper,
 		authtypes.FeeCollectorName,
@@ -124,7 +126,8 @@ func (s *IntegrationTestSuite) TestAliasFunctions() {
 	s.Require().Equal(s.mintKeeper.StakingTokenSupply(s.ctx), stakingTokenSupply)
 
 	bondedRatio := sdk.NewDecWithPrec(15, 2)
-	s.stakingKeeper.EXPECT().BondedRatio(s.ctx).Return(bondedRatio)
+	s.stakingKeeper.EXPECT().StakingTokenSupply(s.ctx).Return(stakingTokenSupply)
+	s.stakingKeeper.EXPECT().TotalBondedTokens(s.ctx).Return(math.NewInt(15000000000))
 	s.Require().Equal(s.mintKeeper.BondedRatio(s.ctx), bondedRatio)
 
 	coins := sdk.NewCoins(sdk.NewCoin("stake", sdk.NewInt(1000000)))

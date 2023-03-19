@@ -9,6 +9,8 @@ import (
 
 // TODO: Break into several smaller functions for clarity
 
+// NOTE: We have to check if the KYVE Protocol staking keeper is defined to ensure minimal changes.
+
 // Tally iterates over the votes and updates the tally of a proposal based on the voting power of the
 // voters
 func (keeper Keeper) Tally(ctx sdk.Context, proposal v1.Proposal) (passes bool, burnDeposits bool, tallyResults v1.TallyResult) {
@@ -34,6 +36,18 @@ func (keeper Keeper) Tally(ctx sdk.Context, proposal v1.Proposal) (passes bool, 
 		return false
 	})
 
+	// Fetch and insert all KYVE Protocol validators into list of current validators.
+	// NOTE: The key used is a normal "kyve1blah" address.
+	if keeper.protocolStakingKeeper != nil {
+		for _, rawVal := range keeper.protocolStakingKeeper.GetActiveValidators(ctx) {
+			// NOTE: We have to typecast to avoid creating import cycles when defining the function interfaces.
+			if val, ok := rawVal.(v1.ValidatorGovInfo); ok {
+				address := sdk.AccAddress(val.Address).String()
+				currValidators[address] = val
+			}
+		}
+	}
+
 	keeper.IterateVotes(ctx, proposal.Id, func(vote v1.Vote) bool {
 		// if validator, just record it in the map
 		voter := sdk.MustAccAddressFromBech32(vote.Voter)
@@ -42,6 +56,11 @@ func (keeper Keeper) Tally(ctx sdk.Context, proposal v1.Proposal) (passes bool, 
 		if val, ok := currValidators[valAddrStr]; ok {
 			val.Vote = vote.Options
 			currValidators[valAddrStr] = val
+		}
+		// Check if the voter is a KYVE Protocol validator.
+		if val, ok := currValidators[voter.String()]; ok {
+			val.Vote = vote.Options
+			currValidators[voter.String()] = val
 		}
 
 		// iterate over all delegations from voter, deduct from any delegated-to validators
@@ -68,6 +87,23 @@ func (keeper Keeper) Tally(ctx sdk.Context, proposal v1.Proposal) (passes bool, 
 			return false
 		})
 
+		if keeper.protocolStakingKeeper != nil {
+			validators, amounts := keeper.protocolStakingKeeper.GetDelegations(ctx, voter.String())
+			for idx, address := range validators {
+				if val, ok := currValidators[address]; ok {
+					val.DelegatorDeductions = val.DelegatorDeductions.Add(amounts[idx])
+					currValidators[address] = val
+
+					for _, option := range vote.Options {
+						weight, _ := math.LegacyNewDecFromStr(option.Weight)
+						subPower := amounts[idx].Mul(weight)
+						results[option.Option] = results[option.Option].Add(subPower)
+					}
+					totalVotingPower = totalVotingPower.Add(amounts[idx])
+				}
+			}
+		}
+
 		keeper.deleteVote(ctx, vote.ProposalId, voter)
 		return false
 	})
@@ -92,14 +128,21 @@ func (keeper Keeper) Tally(ctx sdk.Context, proposal v1.Proposal) (passes bool, 
 	params := keeper.GetParams(ctx)
 	tallyResults = v1.NewTallyResultFromMap(results)
 
+	totalBondedTokens := keeper.sk.TotalBondedTokens(ctx)
+	if keeper.protocolStakingKeeper != nil {
+		totalBondedTokens = totalBondedTokens.Add(
+			keeper.protocolStakingKeeper.TotalBondedTokens(ctx),
+		)
+	}
+
 	// TODO: Upgrade the spec to cover all of these cases & remove pseudocode.
 	// If there is no staked coins, the proposal fails
-	if keeper.sk.TotalBondedTokens(ctx).IsZero() {
+	if totalBondedTokens.IsZero() {
 		return false, false, tallyResults
 	}
 
 	// If there is not enough quorum of votes, the proposal fails
-	percentVoting := totalVotingPower.Quo(sdk.NewDecFromInt(keeper.sk.TotalBondedTokens(ctx)))
+	percentVoting := totalVotingPower.Quo(math.LegacyNewDecFromInt(totalBondedTokens))
 	quorum, _ := sdk.NewDecFromStr(params.Quorum)
 	if percentVoting.LT(quorum) {
 		return false, params.BurnVoteQuorum, tallyResults

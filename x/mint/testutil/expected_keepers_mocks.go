@@ -36,20 +36,6 @@ func (m *MockStakingKeeper) EXPECT() *MockStakingKeeperMockRecorder {
 	return m.recorder
 }
 
-// BondedRatio mocks base method.
-func (m *MockStakingKeeper) BondedRatio(ctx types.Context) types.Dec {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BondedRatio", ctx)
-	ret0, _ := ret[0].(types.Dec)
-	return ret0
-}
-
-// BondedRatio indicates an expected call of BondedRatio.
-func (mr *MockStakingKeeperMockRecorder) BondedRatio(ctx interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BondedRatio", reflect.TypeOf((*MockStakingKeeper)(nil).BondedRatio), ctx)
-}
-
 // StakingTokenSupply mocks base method.
 func (m *MockStakingKeeper) StakingTokenSupply(ctx types.Context) math.Int {
 	m.ctrl.T.Helper()
@@ -62,6 +48,57 @@ func (m *MockStakingKeeper) StakingTokenSupply(ctx types.Context) math.Int {
 func (mr *MockStakingKeeperMockRecorder) StakingTokenSupply(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StakingTokenSupply", reflect.TypeOf((*MockStakingKeeper)(nil).StakingTokenSupply), ctx)
+}
+
+// TotalBondedTokens mocks base method.
+func (m *MockStakingKeeper) TotalBondedTokens(ctx types.Context) math.Int {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TotalBondedTokens", ctx)
+	ret0, _ := ret[0].(math.Int)
+	return ret0
+}
+
+// TotalBondedTokens indicates an expected call of TotalBondedTokens.
+func (mr *MockStakingKeeperMockRecorder) TotalBondedTokens(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TotalBondedTokens", reflect.TypeOf((*MockStakingKeeper)(nil).TotalBondedTokens), ctx)
+}
+
+// MockProtocolStakingKeeper is a mock of ProtocolStakingKeeper interface.
+type MockProtocolStakingKeeper struct {
+	ctrl     *gomock.Controller
+	recorder *MockProtocolStakingKeeperMockRecorder
+}
+
+// MockProtocolStakingKeeperMockRecorder is the mock recorder for MockProtocolStakingKeeper.
+type MockProtocolStakingKeeperMockRecorder struct {
+	mock *MockProtocolStakingKeeper
+}
+
+// NewMockProtocolStakingKeeper creates a new mock instance.
+func NewMockProtocolStakingKeeper(ctrl *gomock.Controller) *MockProtocolStakingKeeper {
+	mock := &MockProtocolStakingKeeper{ctrl: ctrl}
+	mock.recorder = &MockProtocolStakingKeeperMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockProtocolStakingKeeper) EXPECT() *MockProtocolStakingKeeperMockRecorder {
+	return m.recorder
+}
+
+// TotalBondedTokens mocks base method.
+func (m *MockProtocolStakingKeeper) TotalBondedTokens(ctx types.Context) math.Int {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TotalBondedTokens", ctx)
+	ret0, _ := ret[0].(math.Int)
+	return ret0
+}
+
+// TotalBondedTokens indicates an expected call of TotalBondedTokens.
+func (mr *MockProtocolStakingKeeperMockRecorder) TotalBondedTokens(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TotalBondedTokens", reflect.TypeOf((*MockProtocolStakingKeeper)(nil).TotalBondedTokens), ctx)
 }
 
 // MockAccountKeeper is a mock of AccountKeeper interface.
