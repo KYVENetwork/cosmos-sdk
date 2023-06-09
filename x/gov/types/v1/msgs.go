@@ -23,12 +23,20 @@ var (
 //
 //nolint:interfacer
 func NewMsgSubmitProposal(messages []sdk.Msg, initialDeposit sdk.Coins, proposer, metadata, title, summary string) (*MsgSubmitProposal, error) {
+	return NewMsgSubmitExpeditedProposal(messages, initialDeposit, proposer, metadata, title, summary, false)
+}
+
+// NewMsgSubmitExpeditedProposal creates a new expedited MsgSubmitProposal.
+//
+//nolint:interfacer
+func NewMsgSubmitExpeditedProposal(messages []sdk.Msg, initialDeposit sdk.Coins, proposer, metadata, title, summary string, expedited bool) (*MsgSubmitProposal, error) {
 	m := &MsgSubmitProposal{
 		InitialDeposit: initialDeposit,
 		Proposer:       proposer,
 		Metadata:       metadata,
 		Title:          title,
 		Summary:        summary,
+		Expedited:      expedited,
 	}
 
 	anys, err := sdktx.SetMsgs(messages)
