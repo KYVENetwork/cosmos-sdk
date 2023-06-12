@@ -209,6 +209,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.AccountKeeper,
 		in.BankKeeper,
 		in.StakingKeeper,
+		nil,
 		in.DistributionKeeper,
 		in.MsgServiceRouter,
 		defaultConfig,

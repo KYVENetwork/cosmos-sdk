@@ -30,6 +30,14 @@ type StakingKeeper interface {
 	)
 }
 
+// ProtocolStakingKeeper expected KYVE Protocol staking keeper (Protocol Validator and Delegator sets) (noalias)
+type ProtocolStakingKeeper interface {
+	GetActiveValidators(sdk.Context) []interface{}
+
+	TotalBondedTokens(sdk.Context) math.Int
+	GetDelegations(sdk.Context, string) ([]string, []math.LegacyDec)
+}
+
 // DistributionKeeper defines the expected distribution keeper (noalias)
 type DistributionKeeper interface {
 	FundCommunityPool(ctx context.Context, amount sdk.Coins, sender sdk.AccAddress) error

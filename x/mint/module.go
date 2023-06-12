@@ -255,6 +255,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.Cdc,
 		in.StoreService,
 		in.StakingKeeper,
+		nil,
 		in.AccountKeeper,
 		in.BankKeeper,
 		feeCollectorName,

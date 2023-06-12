@@ -17,11 +17,12 @@ import (
 
 // Keeper of the mint store
 type Keeper struct {
-	cdc              codec.BinaryCodec
-	storeService     storetypes.KVStoreService
-	stakingKeeper    types.StakingKeeper
-	bankKeeper       types.BankKeeper
-	feeCollectorName string
+	cdc                   codec.BinaryCodec
+	storeService          storetypes.KVStoreService
+	stakingKeeper         types.StakingKeeper
+	protocolStakingKeeper types.ProtocolStakingKeeper
+	bankKeeper            types.BankKeeper
+	feeCollectorName      string
 
 	// the address capable of executing a MsgUpdateParams message. Typically, this
 	// should be the x/gov module account.
@@ -37,6 +38,7 @@ func NewKeeper(
 	cdc codec.BinaryCodec,
 	storeService storetypes.KVStoreService,
 	sk types.StakingKeeper,
+	protocolStakingKeeper types.ProtocolStakingKeeper,
 	ak types.AccountKeeper,
 	bk types.BankKeeper,
 	feeCollectorName string,
@@ -49,14 +51,15 @@ func NewKeeper(
 
 	sb := collections.NewSchemaBuilder(storeService)
 	k := Keeper{
-		cdc:              cdc,
-		storeService:     storeService,
-		stakingKeeper:    sk,
-		bankKeeper:       bk,
-		feeCollectorName: feeCollectorName,
-		authority:        authority,
-		Params:           collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
-		Minter:           collections.NewItem(sb, types.MinterKey, "minter", codec.CollValue[types.Minter](cdc)),
+		cdc:                   cdc,
+		storeService:          storeService,
+		stakingKeeper:         sk,
+		protocolStakingKeeper: protocolStakingKeeper,
+		bankKeeper:            bk,
+		feeCollectorName:      feeCollectorName,
+		authority:             authority,
+		Params:                collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
+		Minter:                collections.NewItem(sb, types.MinterKey, "minter", codec.CollValue[types.Minter](cdc)),
 	}
 
 	schema, err := sb.Build()
@@ -89,7 +92,19 @@ func (k Keeper) StakingTokenSupply(ctx context.Context) math.Int {
 // BondedRatio to be used in BeginBlocker.
 func (k Keeper) BondedRatio(ctx context.Context) math.LegacyDec {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	return k.stakingKeeper.BondedRatio(sdkCtx)
+
+	totalSupply := k.stakingKeeper.StakingTokenSupply(sdkCtx)
+	if !totalSupply.IsPositive() {
+		return math.LegacyZeroDec()
+	}
+
+	bondedTokens := math.LegacyNewDecFromInt(k.stakingKeeper.TotalBondedTokens(sdkCtx))
+	protocolBondedTokens := math.LegacyZeroDec()
+	if k.protocolStakingKeeper != nil {
+		protocolBondedTokens = math.LegacyNewDecFromInt(k.protocolStakingKeeper.TotalBondedTokens(sdkCtx))
+	}
+
+	return bondedTokens.Add(protocolBondedTokens).QuoInt(totalSupply)
 }
 
 // MintCoins implements an alias call to the underlying supply keeper's

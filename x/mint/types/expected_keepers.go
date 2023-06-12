@@ -11,7 +11,12 @@ import (
 // StakingKeeper defines the expected staking keeper
 type StakingKeeper interface {
 	StakingTokenSupply(ctx sdk.Context) math.Int
-	BondedRatio(ctx sdk.Context) math.LegacyDec
+	TotalBondedTokens(ctx sdk.Context) math.Int
+}
+
+// ProtocolStakingKeeper defines the expected KYVE Protocol staking keeper
+type ProtocolStakingKeeper interface {
+	TotalBondedTokens(ctx sdk.Context) math.Int
 }
 
 // AccountKeeper defines the contract required for account APIs.
