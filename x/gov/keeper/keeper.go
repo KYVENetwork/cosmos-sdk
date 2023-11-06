@@ -93,6 +93,11 @@ func NewKeeper(
 	}
 }
 
+// SetProtocolStakingKeeper ...
+func (keeper *Keeper) SetProtocolStakingKeeper(protocolStakingKeeper types.ProtocolStakingKeeper) {
+	keeper.protocolStakingKeeper = protocolStakingKeeper
+}
+
 // Hooks gets the hooks for governance *Keeper {
 func (keeper *Keeper) Hooks() types.GovHooks {
 	if keeper.hooks == nil {

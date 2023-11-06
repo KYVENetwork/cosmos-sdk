@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/cosmos/cosmos-sdk/x/gov/types"
 	"sort"
 
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -159,7 +160,7 @@ func init() {
 	appmodule.Register(
 		&modulev1.Module{},
 		appmodule.Provide(ProvideModule, ProvideKeyTable),
-		appmodule.Invoke(InvokeAddRoutes, InvokeSetHooks))
+		appmodule.Invoke(InvokeAddRoutes, InvokeSetHooks, InvokeSetProtocolStakingKeeper))
 }
 
 type GovInputs struct {
@@ -353,4 +354,18 @@ func (am AppModule) WeightedOperations(simState module.SimulationState) []simtyp
 		am.accountKeeper, am.bankKeeper, am.keeper,
 		simState.ProposalMsgs, simState.LegacyProposalContents,
 	)
+}
+
+func InvokeSetProtocolStakingKeeper(
+	keeper *keeper.Keeper,
+	protocolStakingKeeper types.ProtocolStakingKeeper,
+) error {
+	if keeper == nil {
+		return fmt.Errorf("keeper is nil")
+	}
+	if protocolStakingKeeper == nil {
+		return fmt.Errorf("protocolStakingKeeper is nil")
+	}
+	keeper.SetProtocolStakingKeeper(protocolStakingKeeper)
+	return nil
 }
