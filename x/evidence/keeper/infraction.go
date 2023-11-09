@@ -26,17 +26,20 @@ import (
 // in the case of a lunatic attack.
 func (k Keeper) handleEquivocationEvidence(ctx context.Context, evidence *types.Equivocation) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	logger := k.Logger(sdkCtx)
-	consAddr := evidence.GetConsensusAddress()
+	logger := k.Logger(ctx)
+	consAddr := evidence.GetConsensusAddress(k.stakingKeeper.ConsensusAddressCodec())
 
-	validator := k.stakingKeeper.ValidatorByConsAddr(sdkCtx, consAddr)
+	validator, err := k.stakingKeeper.ValidatorByConsAddr(ctx, consAddr)
+	if err != nil {
+		return err
+	}
 	if validator == nil || validator.IsUnbonded() {
 		// Defensive: Simulation doesn't take unbonding periods into account, and
 		// CometBFT might break this assumption at some point.
 		return nil
 	}
 
-	if !validator.GetOperator().Empty() {
+	if len(validator.GetOperator()) != 0 {
 		if _, err := k.slashingKeeper.GetPubkey(ctx, consAddr.Bytes()); err != nil {
 			// Ignore evidence that cannot be handled.
 			//

@@ -10,8 +10,9 @@ import (
 
 // StakingKeeper defines the expected staking keeper
 type StakingKeeper interface {
-	StakingTokenSupply(ctx sdk.Context) math.Int
-	TotalBondedTokens(ctx sdk.Context) math.Int
+	StakingTokenSupply(context.Context) (math.Int, error)
+	TotalBondedTokens(context.Context) (math.Int, error) // total bonded tokens within the validator set
+	BondedRatio(ctx context.Context) (math.LegacyDec, error)
 }
 
 // ProtocolStakingKeeper defines the expected KYVE Protocol staking keeper

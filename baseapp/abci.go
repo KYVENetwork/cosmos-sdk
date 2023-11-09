@@ -4,22 +4,22 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
-	errorsmod "cosmossdk.io/errors"
-	"cosmossdk.io/store/rootmulti"
-	snapshottypes "cosmossdk.io/store/snapshots/types"
-	storetypes "cosmossdk.io/store/types"
 	"github.com/cockroachdb/errors"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/gogoproto/proto"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+
+	coreheader "cosmossdk.io/core/header"
+	errorsmod "cosmossdk.io/errors"
+	"cosmossdk.io/store/rootmulti"
+	snapshottypes "cosmossdk.io/store/snapshots/types"
+	storetypes "cosmossdk.io/store/types"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/telemetry"
@@ -45,13 +45,14 @@ func (app *BaseApp) InitChain(req *abci.RequestInitChain) (*abci.ResponseInitCha
 	// On a new chain, we consider the init chain block height as 0, even though
 	// req.InitialHeight is 1 by default.
 	initHeader := cmtproto.Header{ChainID: req.ChainId, Time: req.Time}
-	app.initialHeight = req.InitialHeight
-
 	app.logger.Info("InitChain", "initialHeight", req.InitialHeight, "chainID", req.ChainId)
 
 	// Set the initial height, which will be used to determine if we are proposing
 	// or processing the first block or not.
 	app.initialHeight = req.InitialHeight
+	if app.initialHeight == 0 { // If initial height is 0, set it to 1
+		app.initialHeight = 1
+	}
 
 	// if req.InitialHeight is > 1, then we set the initial version on all stores
 	if req.InitialHeight > 1 {
@@ -81,8 +82,18 @@ func (app *BaseApp) InitChain(req *abci.RequestInitChain) (*abci.ResponseInitCha
 		// handler, the block height is zero by default. However, after Commit is called
 		// the height needs to reflect the true block height.
 		initHeader.Height = req.InitialHeight
-		app.checkState.ctx = app.checkState.ctx.WithBlockHeader(initHeader)
-		app.finalizeBlockState.ctx = app.finalizeBlockState.ctx.WithBlockHeader(initHeader)
+		app.checkState.ctx = app.checkState.ctx.WithBlockHeader(initHeader).
+			WithHeaderInfo(coreheader.Info{
+				ChainID: req.ChainId,
+				Height:  req.InitialHeight,
+				Time:    req.Time,
+			})
+		app.finalizeBlockState.ctx = app.finalizeBlockState.ctx.WithBlockHeader(initHeader).
+			WithHeaderInfo(coreheader.Info{
+				ChainID: req.ChainId,
+				Height:  req.InitialHeight,
+				Time:    req.Time,
+			})
 	}()
 
 	if app.initChainer == nil {
@@ -389,6 +400,7 @@ func (app *BaseApp) PrepareProposal(req *abci.RequestPrepareProposal) (resp *abc
 		Time:               req.Time,
 		ProposerAddress:    req.ProposerAddress,
 		NextValidatorsHash: req.NextValidatorsHash,
+		AppHash:            app.LastCommitID().Hash,
 	}
 	app.setState(execModePrepareProposal, header)
 
@@ -405,7 +417,12 @@ func (app *BaseApp) PrepareProposal(req *abci.RequestPrepareProposal) (resp *abc
 		WithBlockTime(req.Time).
 		WithProposer(req.ProposerAddress).
 		WithExecMode(sdk.ExecModePrepareProposal).
-		WithCometInfo(prepareProposalInfo{req})
+		WithCometInfo(prepareProposalInfo{req}).
+		WithHeaderInfo(coreheader.Info{
+			ChainID: app.chainID,
+			Height:  req.Height,
+			Time:    req.Time,
+		})
 
 	app.prepareProposalState.ctx = app.prepareProposalState.ctx.
 		WithConsensusParams(app.GetConsensusParams(app.prepareProposalState.ctx)).
@@ -420,14 +437,14 @@ func (app *BaseApp) PrepareProposal(req *abci.RequestPrepareProposal) (resp *abc
 				"panic", err,
 			)
 
-			resp = &abci.ResponsePrepareProposal{}
+			resp = &abci.ResponsePrepareProposal{Txs: req.Txs}
 		}
 	}()
 
 	resp, err = app.prepareProposal(app.prepareProposalState.ctx, req)
 	if err != nil {
-		app.logger.Error("failed to prepare proposal", "height", req.Height, "error", err)
-		return &abci.ResponsePrepareProposal{}, nil
+		app.logger.Error("failed to prepare proposal", "height", req.Height, "time", req.Time, "err", err)
+		return &abci.ResponsePrepareProposal{Txs: req.Txs}, nil
 	}
 
 	return resp, nil
@@ -467,6 +484,7 @@ func (app *BaseApp) ProcessProposal(req *abci.RequestProcessProposal) (resp *abc
 		Time:               req.Time,
 		ProposerAddress:    req.ProposerAddress,
 		NextValidatorsHash: req.NextValidatorsHash,
+		AppHash:            app.LastCommitID().Hash,
 	}
 	app.setState(execModeProcessProposal, header)
 
@@ -476,6 +494,8 @@ func (app *BaseApp) ProcessProposal(req *abci.RequestProcessProposal) (resp *abc
 	// processed the first block, as we want to avoid overwriting the finalizeState
 	// after state changes during InitChain.
 	if req.Height > app.initialHeight {
+		// abort any running OE
+		app.optimisticExec.Abort()
 		app.setState(execModeFinalize, header)
 	}
 
@@ -486,7 +506,12 @@ func (app *BaseApp) ProcessProposal(req *abci.RequestProcessProposal) (resp *abc
 		WithHeaderHash(req.Hash).
 		WithProposer(req.ProposerAddress).
 		WithCometInfo(cometInfo{ProposerAddress: req.ProposerAddress, ValidatorsHash: req.NextValidatorsHash, Misbehavior: req.Misbehavior, LastCommit: req.ProposedLastCommit}).
-		WithExecMode(sdk.ExecModeProcessProposal)
+		WithExecMode(sdk.ExecModeProcessProposal).
+		WithHeaderInfo(coreheader.Info{
+			ChainID: app.chainID,
+			Height:  req.Height,
+			Time:    req.Time,
+		})
 
 	app.processProposalState.ctx = app.processProposalState.ctx.
 		WithConsensusParams(app.GetConsensusParams(app.processProposalState.ctx)).
@@ -507,8 +532,21 @@ func (app *BaseApp) ProcessProposal(req *abci.RequestProcessProposal) (resp *abc
 
 	resp, err = app.processProposal(app.processProposalState.ctx, req)
 	if err != nil {
-		app.logger.Error("failed to process proposal", "height", req.Height, "error", err)
+		app.logger.Error("failed to process proposal", "height", req.Height, "time", req.Time, "hash", fmt.Sprintf("%X", req.Hash), "err", err)
 		return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+	}
+
+	// Only execute optimistic execution if the proposal is accepted, OE is
+	// enabled and the block height is greater than the initial height. During
+	// the first block we'll be carrying state from InitChain, so it would be
+	// impossible for us to easily revert.
+	// After the first block has been processed, the next blocks will get executed
+	// optimistically, so that when the ABCI client calls `FinalizeBlock` the app
+	// can have a response ready.
+	if resp.Status == abci.ResponseProcessProposal_ACCEPT &&
+		app.optimisticExec.Enabled() &&
+		req.Height > app.initialHeight {
+		app.optimisticExec.Execute(req)
 	}
 
 	return resp, nil
@@ -526,8 +564,18 @@ func (app *BaseApp) ProcessProposal(req *abci.RequestProcessProposal) (resp *abc
 func (app *BaseApp) ExtendVote(_ context.Context, req *abci.RequestExtendVote) (resp *abci.ResponseExtendVote, err error) {
 	// Always reset state given that ExtendVote and VerifyVoteExtension can timeout
 	// and be called again in a subsequent round.
-	emptyHeader := cmtproto.Header{ChainID: app.chainID, Height: req.Height}
-	app.setState(execModeVoteExtension, emptyHeader)
+	var ctx sdk.Context
+
+	// If we're extending the vote for the initial height, we need to use the
+	// finalizeBlockState context, otherwise we don't get the uncommitted data
+	// from InitChain.
+	if req.Height == app.initialHeight {
+		ctx, _ = app.finalizeBlockState.ctx.CacheContext()
+	} else {
+		emptyHeader := cmtproto.Header{ChainID: app.chainID, Height: req.Height}
+		ms := app.cms.CacheMultiStore()
+		ctx = sdk.NewContext(ms, emptyHeader, false, app.logger).WithStreamingManager(app.streamingManager)
+	}
 
 	if app.extendVote == nil {
 		return nil, errors.New("application ExtendVote handler not set")
@@ -535,17 +583,28 @@ func (app *BaseApp) ExtendVote(_ context.Context, req *abci.RequestExtendVote) (
 
 	// If vote extensions are not enabled, as a safety precaution, we return an
 	// error.
-	cp := app.GetConsensusParams(app.voteExtensionState.ctx)
-	if cp.Abci != nil && cp.Abci.VoteExtensionsEnableHeight <= 0 {
+	cp := app.GetConsensusParams(ctx)
+
+	// Note: In this case, we do want to extend vote if the height is equal or
+	// greater than VoteExtensionsEnableHeight. This defers from the check done
+	// in ValidateVoteExtensions and PrepareProposal in which we'll check for
+	// vote extensions on VoteExtensionsEnableHeight+1.
+	extsEnabled := cp.Abci != nil && req.Height >= cp.Abci.VoteExtensionsEnableHeight && cp.Abci.VoteExtensionsEnableHeight != 0
+	if !extsEnabled {
 		return nil, fmt.Errorf("vote extensions are not enabled; unexpected call to ExtendVote at height %d", req.Height)
 	}
 
-	app.voteExtensionState.ctx = app.voteExtensionState.ctx.
+	ctx = ctx.
 		WithConsensusParams(cp).
 		WithBlockGasMeter(storetypes.NewInfiniteGasMeter()).
 		WithBlockHeight(req.Height).
 		WithHeaderHash(req.Hash).
-		WithExecMode(sdk.ExecModeVoteExtension)
+		WithExecMode(sdk.ExecModeVoteExtension).
+		WithHeaderInfo(coreheader.Info{
+			ChainID: app.chainID,
+			Height:  req.Height,
+			Hash:    req.Hash,
+		})
 
 	// add a deferred recover handler in case extendVote panics
 	defer func() {
@@ -560,9 +619,9 @@ func (app *BaseApp) ExtendVote(_ context.Context, req *abci.RequestExtendVote) (
 		}
 	}()
 
-	resp, err = app.extendVote(app.voteExtensionState.ctx, req)
+	resp, err = app.extendVote(ctx, req)
 	if err != nil {
-		app.logger.Error("failed to extend vote", "height", req.Height, "error", err)
+		app.logger.Error("failed to extend vote", "height", req.Height, "hash", fmt.Sprintf("%X", req.Hash), "err", err)
 		return &abci.ResponseExtendVote{VoteExtension: []byte{}}, nil
 	}
 
@@ -580,10 +639,27 @@ func (app *BaseApp) VerifyVoteExtension(req *abci.RequestVerifyVoteExtension) (r
 		return nil, errors.New("application VerifyVoteExtension handler not set")
 	}
 
+	var ctx sdk.Context
+
+	// If we're verifying the vote for the initial height, we need to use the
+	// finalizeBlockState context, otherwise we don't get the uncommitted data
+	// from InitChain.
+	if req.Height == app.initialHeight {
+		ctx, _ = app.finalizeBlockState.ctx.CacheContext()
+	} else {
+		emptyHeader := cmtproto.Header{ChainID: app.chainID, Height: req.Height}
+		ms := app.cms.CacheMultiStore()
+		ctx = sdk.NewContext(ms, emptyHeader, false, app.logger).WithStreamingManager(app.streamingManager)
+	}
+
 	// If vote extensions are not enabled, as a safety precaution, we return an
 	// error.
-	cp := app.GetConsensusParams(app.voteExtensionState.ctx)
-	if cp.Abci != nil && cp.Abci.VoteExtensionsEnableHeight <= 0 {
+	cp := app.GetConsensusParams(ctx)
+
+	// Note: we verify votes extensions on VoteExtensionsEnableHeight+1. Check
+	// comment in ExtendVote and ValidateVoteExtensions for more details.
+	extsEnabled := cp.Abci != nil && req.Height >= cp.Abci.VoteExtensionsEnableHeight && cp.Abci.VoteExtensionsEnableHeight != 0
+	if !extsEnabled {
 		return nil, fmt.Errorf("vote extensions are not enabled; unexpected call to VerifyVoteExtension at height %d", req.Height)
 	}
 
@@ -601,27 +677,25 @@ func (app *BaseApp) VerifyVoteExtension(req *abci.RequestVerifyVoteExtension) (r
 		}
 	}()
 
-	resp, err = app.verifyVoteExt(app.voteExtensionState.ctx, req)
+	resp, err = app.verifyVoteExt(ctx, req)
 	if err != nil {
-		app.logger.Error("failed to verify vote extension", "height", req.Height, "error", err)
+		app.logger.Error("failed to verify vote extension", "height", req.Height, "err", err)
 		return &abci.ResponseVerifyVoteExtension{Status: abci.ResponseVerifyVoteExtension_REJECT}, nil
 	}
 
 	return resp, err
 }
 
-// FinalizeBlock will execute the block proposal provided by RequestFinalizeBlock.
-// Specifically, it will execute an application's BeginBlock (if defined), followed
-// by the transactions in the proposal, finally followed by the application's
-// EndBlock (if defined).
-//
-// For each raw transaction, i.e. a byte slice, BaseApp will only execute it if
-// it adheres to the sdk.Tx interface. Otherwise, the raw transaction will be
-// skipped. This is to support compatibility with proposers injecting vote
-// extensions into the proposal, which should not themselves be executed in cases
-// where they adhere to the sdk.Tx interface.
-func (app *BaseApp) FinalizeBlock(req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
+// internalFinalizeBlock executes the block, called by the Optimistic
+// Execution flow or by the FinalizeBlock ABCI method. The context received is
+// only used to handle early cancellation, for anything related to state app.finalizeBlockState.ctx
+// must be used.
+func (app *BaseApp) internalFinalizeBlock(ctx context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	var events []abci.Event
+
+	if err := app.checkHalt(req.Height, req.Time); err != nil {
+		return nil, err
+	}
 
 	if err := app.validateFinalizeBlockHeight(req); err != nil {
 		return nil, err
@@ -639,29 +713,40 @@ func (app *BaseApp) FinalizeBlock(req *abci.RequestFinalizeBlock) (*abci.Respons
 		Time:               req.Time,
 		ProposerAddress:    req.ProposerAddress,
 		NextValidatorsHash: req.NextValidatorsHash,
+		AppHash:            app.LastCommitID().Hash,
 	}
 
-	// Initialize the FinalizeBlock state. If this is the first block, it should
-	// already be initialized in InitChain. Otherwise app.finalizeBlockState will be
-	// nil, since it is reset on Commit.
+	// finalizeBlockState should be set on InitChain or ProcessProposal. If it is
+	// nil, it means we are replaying this block and we need to set the state here
+	// given that during block replay ProcessProposal is not executed by CometBFT.
 	if app.finalizeBlockState == nil {
 		app.setState(execModeFinalize, header)
-	} else {
-		// In the first block, app.finalizeBlockState.ctx will already be initialized
-		// by InitChain. Context is now updated with Header information.
-		app.finalizeBlockState.ctx = app.finalizeBlockState.ctx.
-			WithBlockHeader(header).
-			WithBlockHeight(req.Height)
 	}
 
-	gasMeter := app.getBlockGasMeter(app.finalizeBlockState.ctx)
-
+	// Context is now updated with Header information.
 	app.finalizeBlockState.ctx = app.finalizeBlockState.ctx.
-		WithBlockGasMeter(gasMeter).
+		WithBlockHeader(header).
 		WithHeaderHash(req.Hash).
+		WithHeaderInfo(coreheader.Info{
+			ChainID: app.chainID,
+			Height:  req.Height,
+			Time:    req.Time,
+			Hash:    req.Hash,
+			AppHash: app.LastCommitID().Hash,
+		}).
 		WithConsensusParams(app.GetConsensusParams(app.finalizeBlockState.ctx)).
 		WithVoteInfos(req.DecidedLastCommit.Votes).
-		WithExecMode(sdk.ExecModeFinalize)
+		WithExecMode(sdk.ExecModeFinalize).
+		WithCometInfo(cometInfo{
+			Misbehavior:     req.Misbehavior,
+			ValidatorsHash:  req.NextValidatorsHash,
+			ProposerAddress: req.ProposerAddress,
+			LastCommit:      req.DecidedLastCommit,
+		})
+
+	// GasMeter must be set after we get a context with updated consensus params.
+	gasMeter := app.getBlockGasMeter(app.finalizeBlockState.ctx)
+	app.finalizeBlockState.ctx = app.finalizeBlockState.ctx.WithBlockGasMeter(gasMeter)
 
 	if app.checkState != nil {
 		app.checkState.ctx = app.checkState.ctx.
@@ -669,7 +754,24 @@ func (app *BaseApp) FinalizeBlock(req *abci.RequestFinalizeBlock) (*abci.Respons
 			WithHeaderHash(req.Hash)
 	}
 
-	beginBlock := app.beginBlock(req)
+	if err := app.preBlock(req); err != nil {
+		return nil, err
+	}
+
+	beginBlock, err := app.beginBlock(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// First check for an abort signal after beginBlock, as it's the first place
+	// we spend any significant amount of time.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+		// continue
+	}
+
 	events = append(events, beginBlock.Events...)
 
 	// Iterate over all raw transactions in the proposal and attempt to execute
@@ -679,9 +781,32 @@ func (app *BaseApp) FinalizeBlock(req *abci.RequestFinalizeBlock) (*abci.Respons
 	// vote extensions, so skip those.
 	txResults := make([]*abci.ExecTxResult, 0, len(req.Txs))
 	for _, rawTx := range req.Txs {
+		var response *abci.ExecTxResult
+
 		if _, err := app.txDecoder(rawTx); err == nil {
-			txResults = append(txResults, app.deliverTx(rawTx))
+			response = app.deliverTx(rawTx)
+		} else {
+			// In the case where a transaction included in a block proposal is malformed,
+			// we still want to return a default response to comet. This is because comet
+			// expects a response for each transaction included in a block proposal.
+			response = sdkerrors.ResponseExecTxResultWithEvents(
+				sdkerrors.ErrTxDecode,
+				0,
+				0,
+				nil,
+				false,
+			)
 		}
+
+		// check after every tx if we should abort
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			// continue
+		}
+
+		txResults = append(txResults, response)
 	}
 
 	if app.finalizeBlockState.ms.TracingEnabled() {
@@ -693,6 +818,14 @@ func (app *BaseApp) FinalizeBlock(req *abci.RequestFinalizeBlock) (*abci.Respons
 		return nil, err
 	}
 
+	// check after endBlock if we should abort, to avoid propagating the result
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+		// continue
+	}
+
 	events = append(events, endBlock.Events...)
 	cp := app.GetConsensusParams(app.finalizeBlockState.ctx)
 
@@ -701,8 +834,63 @@ func (app *BaseApp) FinalizeBlock(req *abci.RequestFinalizeBlock) (*abci.Respons
 		TxResults:             txResults,
 		ValidatorUpdates:      endBlock.ValidatorUpdates,
 		ConsensusParamUpdates: &cp,
-		AppHash:               app.workingHash(),
 	}, nil
+}
+
+// FinalizeBlock will execute the block proposal provided by RequestFinalizeBlock.
+// Specifically, it will execute an application's BeginBlock (if defined), followed
+// by the transactions in the proposal, finally followed by the application's
+// EndBlock (if defined).
+//
+// For each raw transaction, i.e. a byte slice, BaseApp will only execute it if
+// it adheres to the sdk.Tx interface. Otherwise, the raw transaction will be
+// skipped. This is to support compatibility with proposers injecting vote
+// extensions into the proposal, which should not themselves be executed in cases
+// where they adhere to the sdk.Tx interface.
+func (app *BaseApp) FinalizeBlock(req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
+	if app.optimisticExec.Initialized() {
+		// check if the hash we got is the same as the one we are executing
+		aborted := app.optimisticExec.AbortIfNeeded(req.Hash)
+		// Wait for the OE to finish, regardless of whether it was aborted or not
+		res, err := app.optimisticExec.WaitResult()
+
+		// only return if we are not aborting
+		if !aborted {
+			if res != nil {
+				res.AppHash = app.workingHash()
+			}
+			return res, err
+		}
+
+		// if it was aborted, we need to reset the state
+		app.finalizeBlockState = nil
+		app.optimisticExec.Reset()
+	}
+
+	// if no OE is running, just run the block (this is either a block replay or a OE that got aborted)
+	res, err := app.internalFinalizeBlock(context.Background(), req)
+	if res != nil {
+		res.AppHash = app.workingHash()
+	}
+	return res, err
+}
+
+// checkHalt checkes if height or time exceeds halt-height or halt-time respectively.
+func (app *BaseApp) checkHalt(height int64, time time.Time) error {
+	var halt bool
+	switch {
+	case app.haltHeight > 0 && uint64(height) > app.haltHeight:
+		halt = true
+
+	case app.haltTime > 0 && time.Unix() > int64(app.haltTime):
+		halt = true
+	}
+
+	if halt {
+		return fmt.Errorf("halt per configuration height %d time %d", app.haltHeight, app.haltTime)
+	}
+
+	return nil
 }
 
 // Commit implements the ABCI interface. It will commit all state that exists in
@@ -756,24 +944,8 @@ func (app *BaseApp) Commit() (*abci.ResponseCommit, error) {
 		app.prepareCheckStater(app.checkState.ctx)
 	}
 
-	var halt bool
-	switch {
-	case app.haltHeight > 0 && uint64(header.Height) >= app.haltHeight:
-		halt = true
-
-	case app.haltTime > 0 && header.Time.Unix() >= int64(app.haltTime):
-		halt = true
-	}
-
-	if halt {
-		// Halt the binary and allow CometBFT to receive the ResponseCommit
-		// response with the commit ID hash. This will allow the node to successfully
-		// restart and process blocks assuming the halt configuration has been
-		// reset or moved to a more distant value.
-		app.halt()
-	}
-
-	go app.snapshotManager.SnapshotIfApplicable(header.Height)
+	// The SnapshotIfApplicable method will create the snapshot by starting the goroutine
+	app.snapshotManager.SnapshotIfApplicable(header.Height)
 
 	return resp, nil
 }
@@ -794,28 +966,6 @@ func (app *BaseApp) workingHash() []byte {
 	app.logger.Debug("hash of all writes", "workingHash", fmt.Sprintf("%X", commitHash))
 
 	return commitHash
-}
-
-// halt attempts to gracefully shutdown the node via SIGINT and SIGTERM falling
-// back on os.Exit if both fail.
-func (app *BaseApp) halt() {
-	app.logger.Info("halting node per configuration", "height", app.haltHeight, "time", app.haltTime)
-
-	p, err := os.FindProcess(os.Getpid())
-	if err == nil {
-		// attempt cascading signals in case SIGINT fails (os dependent)
-		sigIntErr := p.Signal(syscall.SIGINT)
-		sigTermErr := p.Signal(syscall.SIGTERM)
-
-		if sigIntErr == nil || sigTermErr == nil {
-			return
-		}
-	}
-
-	// Resort to exiting immediately if the process could not be found or killed
-	// via SIGINT/SIGTERM signals.
-	app.logger.Info("failed to send SIGINT/SIGTERM; exiting...")
-	os.Exit(0)
 }
 
 func handleQueryApp(app *BaseApp, path []string, req *abci.RequestQuery) *abci.ResponseQuery {
@@ -959,7 +1109,7 @@ func (app *BaseApp) getContextForProposal(ctx sdk.Context, height int64) sdk.Con
 		ctx, _ = app.finalizeBlockState.ctx.CacheContext()
 
 		// clear all context data set during InitChain to avoid inconsistent behavior
-		ctx = ctx.WithBlockHeader(cmtproto.Header{})
+		ctx = ctx.WithBlockHeader(cmtproto.Header{}).WithHeaderInfo(coreheader.Info{})
 		return ctx
 	}
 
@@ -1065,7 +1215,8 @@ func (app *BaseApp) CreateQueryContext(height int64, prove bool) (sdk.Context, e
 	// branch the commit multi-store for safety
 	ctx := sdk.NewContext(cacheMS, app.checkState.ctx.BlockHeader(), true, app.logger).
 		WithMinGasPrices(app.minGasPrices).
-		WithBlockHeight(height)
+		WithBlockHeight(height).
+		WithGasMeter(storetypes.NewGasMeter(app.queryGasLimit))
 
 	if height != lastBlockHeight {
 		rms, ok := app.cms.(*rootmulti.Store)

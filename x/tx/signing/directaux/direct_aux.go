@@ -10,7 +10,6 @@ import (
 
 	signingv1beta1 "cosmossdk.io/api/cosmos/tx/signing/v1beta1"
 	txv1beta1 "cosmossdk.io/api/cosmos/tx/v1beta1"
-
 	"cosmossdk.io/x/tx/signing"
 )
 
@@ -101,7 +100,7 @@ func (h SignModeHandler) GetSignBytes(
 		ChainId:       signerData.ChainID,
 		AccountNumber: signerData.AccountNumber,
 		Sequence:      signerData.Sequence,
-		Tip:           txData.AuthInfo.Tip,
+		Tip:           txData.AuthInfo.Tip, //nolint:staticcheck // keep it for compatibility
 	}
 	return proto.Marshal(signDocDirectAux)
 }

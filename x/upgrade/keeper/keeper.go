@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/hashicorp/go-metrics"
+
 	corestore "cosmossdk.io/core/store"
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log"
@@ -19,8 +21,6 @@ import (
 	storetypes "cosmossdk.io/store/types"
 	xp "cosmossdk.io/x/upgrade/exported"
 	"cosmossdk.io/x/upgrade/types"
-
-	"github.com/armon/go-metrics"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/runtime"
@@ -570,6 +570,10 @@ func (k Keeper) ReadUpgradeInfoFromDisk() (types.Plan, error) {
 	}
 
 	if err := json.Unmarshal(data, &upgradeInfo); err != nil {
+		return upgradeInfo, err
+	}
+
+	if err := upgradeInfo.ValidateBasic(); err != nil {
 		return upgradeInfo, err
 	}
 

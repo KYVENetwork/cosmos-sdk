@@ -7,17 +7,14 @@ import (
 	"testing"
 	"time"
 
-	gov_v1_api "cosmossdk.io/api/cosmos/gov/v1"
-	msgv1 "cosmossdk.io/api/cosmos/msg/v1"
+	"github.com/cosmos/cosmos-proto/rapidproto"
+	gogoproto "github.com/cosmos/gogoproto/proto"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"pgregory.net/rapid"
-
-	"github.com/cosmos/cosmos-proto/rapidproto"
-	gogoproto "github.com/cosmos/gogoproto/proto"
 
 	authapi "cosmossdk.io/api/cosmos/auth/v1beta1"
 	authzapi "cosmossdk.io/api/cosmos/authz/v1beta1"
@@ -27,7 +24,9 @@ import (
 	multisigapi "cosmossdk.io/api/cosmos/crypto/multisig"
 	"cosmossdk.io/api/cosmos/crypto/secp256k1"
 	distapi "cosmossdk.io/api/cosmos/distribution/v1beta1"
+	gov_v1_api "cosmossdk.io/api/cosmos/gov/v1"
 	gov_v1beta1_api "cosmossdk.io/api/cosmos/gov/v1beta1"
+	msgv1 "cosmossdk.io/api/cosmos/msg/v1"
 	slashingapi "cosmossdk.io/api/cosmos/slashing/v1beta1"
 	stakingapi "cosmossdk.io/api/cosmos/staking/v1beta1"
 	txv1beta1 "cosmossdk.io/api/cosmos/tx/v1beta1"
@@ -50,7 +49,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/bech32"
 	"github.com/cosmos/cosmos-sdk/types/module/testutil"
-	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
 	signingtypes "github.com/cosmos/cosmos-sdk/types/tx/signing"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	"github.com/cosmos/cosmos-sdk/x/auth/migrations/legacytx"
@@ -150,10 +148,6 @@ func TestAminoJSON_Equivalence(t *testing.T) {
 					AccNum:        1,
 					AccSeq:        2,
 					SignerAddress: "signerAddress",
-					Tip: &txv1beta1.Tip{
-						Tipper: "tipper",
-						Amount: []*v1beta1.Coin{{Denom: "uatom", Amount: "1000"}},
-					},
 					Fee: &txv1beta1.Fee{
 						Amount: []*v1beta1.Coin{{Denom: "uatom", Amount: "1000"}},
 					},
@@ -171,10 +165,6 @@ func TestAminoJSON_Equivalence(t *testing.T) {
 				require.NoError(t, txBuilder.SetMsgs([]types.Msg{tt.Gogo}...))
 				txBuilder.SetMemo(handlerOptions.Memo)
 				txBuilder.SetFeeAmount(types.Coins{types.NewInt64Coin("uatom", 1000)})
-				txBuilder.SetTip(&txtypes.Tip{
-					Amount: types.Coins{types.NewInt64Coin("uatom", 1000)},
-					Tipper: "tipper",
-				})
 				theTx := txBuilder.GetTx()
 
 				legacySigningData := signing.SignerData{
@@ -218,7 +208,7 @@ func TestAminoJSON_LegacyParity(t *testing.T) {
 	pubkeyAny, _ := codectypes.NewAnyWithValue(&secp256k1types.PubKey{Key: []byte("foo")})
 	pubkeyAnyPulsar := newAny(t, &secp256k1.PubKey{Key: []byte("foo")})
 	dec10bz, _ := math.LegacyNewDec(10).Marshal()
-	int123bz, _ := types.NewInt(123).Marshal()
+	int123bz, _ := math.NewInt(123).Marshal()
 
 	cases := map[string]struct {
 		gogo               gogoproto.Message
@@ -278,7 +268,7 @@ func TestAminoJSON_LegacyParity(t *testing.T) {
 		},
 		"distribution/community_pool_spend_proposal_with_deposit": {
 			gogo:   &disttypes.CommunityPoolSpendProposalWithDeposit{},
-			pulsar: &distapi.CommunityPoolSpendProposalWithDeposit{},
+			pulsar: &distapi.CommunityPoolSpendProposalWithDeposit{}, //nolint:staticcheck // keep test as is testing legacy parity
 		},
 		"distribution/msg_withdraw_delegator_reward": {
 			gogo:   &disttypes.MsgWithdrawDelegatorReward{DelegatorAddress: "foo"},
@@ -397,7 +387,7 @@ func TestAminoJSON_LegacyParity(t *testing.T) {
 			pulsar: &vestingapi.BaseVestingAccount{BaseAccount: &authapi.BaseAccount{PubKey: pubkeyAnyPulsar}},
 		},
 		"math/int_as_string": {
-			gogo:   &gogo_testpb.IntAsString{IntAsString: types.NewInt(123)},
+			gogo:   &gogo_testpb.IntAsString{IntAsString: math.NewInt(123)},
 			pulsar: &pulsar_testpb.IntAsString{IntAsString: "123"},
 		},
 		"math/int_as_string/empty": {
@@ -405,7 +395,7 @@ func TestAminoJSON_LegacyParity(t *testing.T) {
 			pulsar: &pulsar_testpb.IntAsString{},
 		},
 		"math/int_as_bytes": {
-			gogo:   &gogo_testpb.IntAsBytes{IntAsBytes: types.NewInt(123)},
+			gogo:   &gogo_testpb.IntAsBytes{IntAsBytes: math.NewInt(123)},
 			pulsar: &pulsar_testpb.IntAsBytes{IntAsBytes: int123bz},
 		},
 		"math/int_as_bytes/empty": {

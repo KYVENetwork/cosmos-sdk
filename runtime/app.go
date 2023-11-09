@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 
-	runtimev1alpha1 "cosmossdk.io/api/cosmos/app/runtime/v1alpha1"
-	appv1alpha1 "cosmossdk.io/api/cosmos/app/v1alpha1"
-	"cosmossdk.io/log"
-
-	storetypes "cosmossdk.io/store/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"golang.org/x/exp/slices"
+
+	runtimev1alpha1 "cosmossdk.io/api/cosmos/app/runtime/v1alpha1"
+	appv1alpha1 "cosmossdk.io/api/cosmos/app/v1alpha1"
+	"cosmossdk.io/core/appmodule"
+	"cosmossdk.io/log"
+	storetypes "cosmossdk.io/store/types"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -75,7 +76,26 @@ func (a *App) RegisterModules(modules ...module.AppModule) error {
 		appModule.RegisterInterfaces(a.interfaceRegistry)
 		appModule.RegisterLegacyAminoCodec(a.amino)
 
+		if module, ok := appModule.(module.HasServices); ok {
+			module.RegisterServices(a.configurator)
+		} else if module, ok := appModule.(appmodule.HasServices); ok {
+			if err := module.RegisterServices(a.configurator); err != nil {
+				return err
+			}
+		}
 	}
+
+	return nil
+}
+
+// RegisterStores registers the provided store keys.
+// This method should only be used for registering extra stores
+// wiich is necessary for modules that not registered using the app config.
+// To be used in combination of RegisterModules.
+func (a *App) RegisterStores(keys ...storetypes.StoreKey) error {
+	a.storeKeys = append(a.storeKeys, keys...)
+	a.MountStores(keys...)
+
 	return nil
 }
 
@@ -92,6 +112,13 @@ func (a *App) Load(loadLatest bool) error {
 		a.ModuleManager.SetOrderExportGenesis(a.config.ExportGenesis...)
 	} else if len(a.config.InitGenesis) != 0 {
 		a.ModuleManager.SetOrderExportGenesis(a.config.InitGenesis...)
+	}
+
+	if len(a.config.PreBlockers) != 0 {
+		a.ModuleManager.SetOrderPreBlockers(a.config.PreBlockers...)
+		if a.BaseApp.PreBlocker() == nil {
+			a.SetPreBlocker(a.PreBlocker)
+		}
 	}
 
 	if len(a.config.BeginBlockers) != 0 {
@@ -125,6 +152,11 @@ func (a *App) Load(loadLatest bool) error {
 	}
 
 	return nil
+}
+
+// PreBlocker application updates every pre block
+func (a *App) PreBlocker(ctx sdk.Context, _ *abci.RequestFinalizeBlock) (*sdk.ResponsePreBlock, error) {
+	return a.ModuleManager.PreBlock(ctx)
 }
 
 // BeginBlocker application updates every begin block

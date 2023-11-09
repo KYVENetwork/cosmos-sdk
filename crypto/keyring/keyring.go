@@ -12,12 +12,10 @@ import (
 
 	"github.com/99designs/keyring"
 	"github.com/cockroachdb/errors"
-
 	"github.com/cosmos/go-bip39"
+	"golang.org/x/crypto/bcrypt"
 
 	errorsmod "cosmossdk.io/errors"
-
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/cosmos/cosmos-sdk/client/input"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -47,6 +45,8 @@ const (
 
 	// temporary pass phrase for exporting a key during a key rename
 	passPhrase = "temp"
+	// prefix for exported hex private keys
+	hexPrefix = "0x"
 )
 
 var (
@@ -117,7 +117,8 @@ type Signer interface {
 type Importer interface {
 	// ImportPrivKey imports ASCII armored passphrase-encrypted private keys.
 	ImportPrivKey(uid, armor, passphrase string) error
-
+	// ImportPrivKeyHex imports hex encoded keys.
+	ImportPrivKeyHex(uid, privKey, algoStr string) error
 	// ImportPubKey imports ASCII armored public keys.
 	ImportPubKey(uid, armor string) error
 }
@@ -334,6 +335,29 @@ func (ks keystore) ImportPrivKey(uid, armor, passphrase string) error {
 		return err
 	}
 
+	return nil
+}
+
+func (ks keystore) ImportPrivKeyHex(uid, privKey, algoStr string) error {
+	if _, err := ks.Key(uid); err == nil {
+		return errorsmod.Wrap(ErrOverwriteKey, uid)
+	}
+	if privKey[:2] == hexPrefix {
+		privKey = privKey[2:]
+	}
+	decodedPriv, err := hex.DecodeString(privKey)
+	if err != nil {
+		return err
+	}
+	algo, err := NewSigningAlgoFromString(algoStr, ks.options.SupportedAlgos)
+	if err != nil {
+		return err
+	}
+	priv := algo.Generate()(decodedPriv)
+	_, err = ks.writeLocalKey(uid, priv)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -2,7 +2,6 @@ package aminojson
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -73,31 +72,19 @@ func (h SignModeHandler) GetSignBytes(_ context.Context, signerData signing.Sign
 		return nil, fmt.Errorf("got empty address in %s handler: invalid request", h.Mode())
 	}
 
-	tip := txData.AuthInfo.Tip
-	if tip != nil && tip.Tipper == "" {
-		return nil, fmt.Errorf("tipper cannot be empty")
-	}
-	isTipper := tip != nil && tip.Tipper == signerData.Address
-
 	// We set a convention that if the tipper signs with LEGACY_AMINO_JSON, then
 	// they sign over empty fees and 0 gas.
 	var fee *aminojsonpb.AminoSignFee
-	if isTipper {
-		fee = &aminojsonpb.AminoSignFee{
-			Amount: nil,
-			Gas:    0,
-		}
-	} else {
-		f := txData.AuthInfo.Fee
-		if f == nil {
-			return nil, fmt.Errorf("fee cannot be nil when tipper is not signer")
-		}
-		fee = &aminojsonpb.AminoSignFee{
-			Amount:  f.Amount,
-			Gas:     f.GasLimit,
-			Payer:   f.Payer,
-			Granter: f.Granter,
-		}
+
+	f := txData.AuthInfo.Fee
+	if f == nil {
+		return nil, fmt.Errorf("fee cannot be nil when tipper is not signer")
+	}
+	fee = &aminojsonpb.AminoSignFee{
+		Amount:  f.Amount,
+		Gas:     f.GasLimit,
+		Payer:   f.Payer,
+		Granter: f.Granter,
 	}
 
 	signDoc := &aminojsonpb.AminoSignDoc{
@@ -108,30 +95,9 @@ func (h SignModeHandler) GetSignBytes(_ context.Context, signerData signing.Sign
 		Memo:          body.Memo,
 		Msgs:          txData.Body.Messages,
 		Fee:           fee,
-		Tip:           tip,
 	}
 
-	bz, err := h.encoder.Marshal(signDoc)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: remove this sort once https://github.com/cosmos/cosmos-sdk/issues/2350#issuecomment-1542715157 lands
-	// the encoder should be rendering fields in lexical order
-	return sortJSON(bz)
-}
-
-// sortJSON sorts the JSON keys of the given JSON encoded byte slice.
-func sortJSON(toSortJSON []byte) ([]byte, error) {
-	var c interface{}
-	err := json.Unmarshal(toSortJSON, &c)
-	if err != nil {
-		return nil, err
-	}
-	js, err := json.Marshal(c)
-	if err != nil {
-		return nil, err
-	}
-	return js, nil
+	return h.encoder.Marshal(signDoc)
 }
 
 var _ signing.SignModeHandler = (*SignModeHandler)(nil)

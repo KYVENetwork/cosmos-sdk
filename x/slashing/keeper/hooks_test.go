@@ -24,10 +24,10 @@ func (s *KeeperTestSuite) TestAfterValidatorCreatedOrRemoved() {
 	_, pubKey, addr := testdata.KeyTestPubAddr()
 	valAddr := sdk.ValAddress(addr)
 
-	validator, err := stakingtypes.NewValidator(sdk.ValAddress(addr), pubKey, stakingtypes.Description{})
+	validator, err := stakingtypes.NewValidator(sdk.ValAddress(addr).String(), pubKey, stakingtypes.Description{})
 	require.NoError(err)
 
-	s.stakingKeeper.EXPECT().Validator(ctx, valAddr).Return(validator)
+	s.stakingKeeper.EXPECT().Validator(ctx, valAddr).Return(validator, nil)
 	err = keeper.Hooks().AfterValidatorCreated(ctx, valAddr)
 	require.NoError(err)
 

@@ -23,4 +23,6 @@ var (
 	ErrInvalidProposer         = errors.Register(ModuleName, 18, "invalid proposer")
 	ErrVotingPeriodEnded       = errors.Register(ModuleName, 20, "voting period already ended")
 	ErrInvalidProposal         = errors.Register(ModuleName, 21, "invalid proposal")
+	ErrSummaryTooLong          = errors.Register(ModuleName, 22, "summary too long")
+	ErrInvalidDepositDenom     = errors.Register(ModuleName, 23, "invalid deposit denom")
 )

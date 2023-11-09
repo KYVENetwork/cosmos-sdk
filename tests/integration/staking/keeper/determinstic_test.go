@@ -4,14 +4,17 @@ import (
 	"testing"
 	"time"
 
-	"cosmossdk.io/log"
-	"cosmossdk.io/math"
-	storetypes "cosmossdk.io/store/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"gotest.tools/v3/assert"
 	"pgregory.net/rapid"
 
+	"cosmossdk.io/core/appmodule"
+	"cosmossdk.io/log"
+	"cosmossdk.io/math"
+	storetypes "cosmossdk.io/store/types"
+
 	"github.com/cosmos/cosmos-sdk/codec"
+	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/runtime"
@@ -86,6 +89,7 @@ func initDeterministicFixture(t *testing.T) *deterministicFixture {
 		runtime.NewKVStoreService(keys[authtypes.StoreKey]),
 		authtypes.ProtoBaseAccount,
 		maccPerms,
+		addresscodec.NewBech32Codec(sdk.Bech32MainPrefix),
 		sdk.Bech32MainPrefix,
 		authority.String(),
 	)
@@ -102,42 +106,47 @@ func initDeterministicFixture(t *testing.T) *deterministicFixture {
 		log.NewNopLogger(),
 	)
 
-	stakingKeeper := stakingkeeper.NewKeeper(cdc, keys[stakingtypes.StoreKey], accountKeeper, bankKeeper, authority.String())
+	stakingKeeper := stakingkeeper.NewKeeper(cdc, runtime.NewKVStoreService(keys[stakingtypes.StoreKey]), accountKeeper, bankKeeper, authority.String(), addresscodec.NewBech32Codec(sdk.Bech32PrefixValAddr), addresscodec.NewBech32Codec(sdk.Bech32PrefixConsAddr))
 
 	authModule := auth.NewAppModule(cdc, accountKeeper, authsims.RandomGenesisAccounts, nil)
 	bankModule := bank.NewAppModule(cdc, bankKeeper, accountKeeper, nil)
 	stakingModule := staking.NewAppModule(cdc, stakingKeeper, accountKeeper, bankKeeper, nil)
 
-	integrationApp := integration.NewIntegrationApp(newCtx, logger, keys, cdc, authModule, bankModule, stakingModule)
+	integrationApp := integration.NewIntegrationApp(newCtx, logger, keys, cdc, map[string]appmodule.AppModule{
+		authtypes.ModuleName:    authModule,
+		banktypes.ModuleName:    bankModule,
+		stakingtypes.ModuleName: stakingModule,
+	})
 
-	sdkCtx := sdk.UnwrapSDKContext(integrationApp.Context())
+	ctx := integrationApp.Context()
 
 	// Register MsgServer and QueryServer
 	stakingtypes.RegisterMsgServer(integrationApp.MsgServiceRouter(), stakingkeeper.NewMsgServerImpl(stakingKeeper))
 	stakingtypes.RegisterQueryServer(integrationApp.QueryHelper(), stakingkeeper.NewQuerier(stakingKeeper))
 
 	// set default staking params
-	stakingKeeper.SetParams(sdkCtx, stakingtypes.DefaultParams())
+	assert.NilError(t, stakingKeeper.SetParams(ctx, stakingtypes.DefaultParams()))
 
 	// set pools
-	startTokens := stakingKeeper.TokensFromConsensusPower(sdkCtx, 10)
-	bondDenom := stakingKeeper.BondDenom(sdkCtx)
-	notBondedPool := stakingKeeper.GetNotBondedPool(sdkCtx)
-	assert.NilError(t, banktestutil.FundModuleAccount(sdkCtx, bankKeeper, notBondedPool.GetName(), sdk.NewCoins(sdk.NewCoin(bondDenom, startTokens))))
-	accountKeeper.SetModuleAccount(sdkCtx, notBondedPool)
-	bondedPool := stakingKeeper.GetBondedPool(sdkCtx)
-	assert.NilError(t, banktestutil.FundModuleAccount(sdkCtx, bankKeeper, bondedPool.GetName(), sdk.NewCoins(sdk.NewCoin(bondDenom, startTokens))))
-	accountKeeper.SetModuleAccount(sdkCtx, bondedPool)
+	startTokens := stakingKeeper.TokensFromConsensusPower(ctx, 10)
+	bondDenom, err := stakingKeeper.BondDenom(ctx)
+	assert.NilError(t, err)
+	notBondedPool := stakingKeeper.GetNotBondedPool(ctx)
+	assert.NilError(t, banktestutil.FundModuleAccount(ctx, bankKeeper, notBondedPool.GetName(), sdk.NewCoins(sdk.NewCoin(bondDenom, startTokens))))
+	accountKeeper.SetModuleAccount(ctx, notBondedPool)
+	bondedPool := stakingKeeper.GetBondedPool(ctx)
+	assert.NilError(t, banktestutil.FundModuleAccount(ctx, bankKeeper, bondedPool.GetName(), sdk.NewCoins(sdk.NewCoin(bondDenom, startTokens))))
+	accountKeeper.SetModuleAccount(ctx, bondedPool)
 
 	qr := integrationApp.QueryHelper()
 	queryClient := stakingtypes.NewQueryClient(qr)
 
-	amt1 := stakingKeeper.TokensFromConsensusPower(sdkCtx, 101)
-	amt2 := stakingKeeper.TokensFromConsensusPower(sdkCtx, 102)
+	amt1 := stakingKeeper.TokensFromConsensusPower(ctx, 101)
+	amt2 := stakingKeeper.TokensFromConsensusPower(ctx, 102)
 
 	f := deterministicFixture{
 		app:           integrationApp,
-		ctx:           sdkCtx,
+		ctx:           sdk.UnwrapSDKContext(ctx),
 		cdc:           cdc,
 		keys:          keys,
 		accountKeeper: accountKeeper,
@@ -184,8 +193,8 @@ func createValidator(rt *rapid.T, f *deterministicFixture, t *testing.T) staking
 		ConsensusPubkey: pubkeyAny,
 		Jailed:          rapid.Bool().Draw(rt, "jailed"),
 		Status:          bondTypeGenerator().Draw(rt, "bond-status"),
-		Tokens:          sdk.NewInt(rapid.Int64Min(10000).Draw(rt, "tokens")),
-		DelegatorShares: sdk.NewDecWithPrec(rapid.Int64Range(1, 100).Draw(rt, "commission"), 2),
+		Tokens:          math.NewInt(rapid.Int64Min(10000).Draw(rt, "tokens")),
+		DelegatorShares: math.LegacyNewDecWithPrec(rapid.Int64Range(1, 100).Draw(rt, "commission"), 2),
 		Description: stakingtypes.NewDescription(
 			rapid.StringN(5, 250, 255).Draw(rt, "moniker"),
 			rapid.StringN(5, 250, 255).Draw(rt, "identity"),
@@ -196,11 +205,11 @@ func createValidator(rt *rapid.T, f *deterministicFixture, t *testing.T) staking
 		UnbondingHeight: rapid.Int64Min(1).Draw(rt, "unbonding-height"),
 		UnbondingTime:   time.Now().Add(durationGenerator().Draw(rt, "duration")),
 		Commission: stakingtypes.NewCommission(
-			sdk.NewDecWithPrec(rapid.Int64Range(0, 100).Draw(rt, "rate"), 2),
-			sdk.NewDecWithPrec(rapid.Int64Range(0, 100).Draw(rt, "max-rate"), 2),
-			sdk.NewDecWithPrec(rapid.Int64Range(0, 100).Draw(rt, "max-change-rate"), 2),
+			math.LegacyNewDecWithPrec(rapid.Int64Range(0, 100).Draw(rt, "rate"), 2),
+			math.LegacyNewDecWithPrec(rapid.Int64Range(0, 100).Draw(rt, "max-rate"), 2),
+			math.LegacyNewDecWithPrec(rapid.Int64Range(0, 100).Draw(rt, "max-change-rate"), 2),
 		),
-		MinSelfDelegation: sdk.NewInt(rapid.Int64Min(1).Draw(rt, "tokens")),
+		MinSelfDelegation: math.NewInt(rapid.Int64Min(1).Draw(rt, "tokens")),
 	}
 }
 
@@ -220,16 +229,19 @@ func createAndSetValidator(rt *rapid.T, f *deterministicFixture, t *testing.T) s
 }
 
 func setValidator(f *deterministicFixture, t *testing.T, validator stakingtypes.Validator) {
-	f.stakingKeeper.SetValidator(f.ctx, validator)
-	f.stakingKeeper.SetValidatorByPowerIndex(f.ctx, validator)
-	f.stakingKeeper.SetValidatorByConsAddr(f.ctx, validator)
-	assert.NilError(t, f.stakingKeeper.Hooks().AfterValidatorCreated(f.ctx, validator.GetOperator()))
+	assert.NilError(t, f.stakingKeeper.SetValidator(f.ctx, validator))
+	assert.NilError(t, f.stakingKeeper.SetValidatorByPowerIndex(f.ctx, validator))
+	assert.NilError(t, f.stakingKeeper.SetValidatorByConsAddr(f.ctx, validator))
+	valbz, err := f.stakingKeeper.ValidatorAddressCodec().StringToBytes(validator.GetOperator())
+	assert.NilError(t, err)
 
-	delegatorAddress := sdk.AccAddress(validator.GetOperator())
+	assert.NilError(t, f.stakingKeeper.Hooks().AfterValidatorCreated(f.ctx, valbz))
+
+	delegatorAddress := sdk.AccAddress(valbz)
 	coins := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, validator.BondedTokens()))
-	banktestutil.FundAccount(f.ctx, f.bankKeeper, delegatorAddress, coins)
+	assert.NilError(t, banktestutil.FundAccount(f.ctx, f.bankKeeper, delegatorAddress, coins))
 
-	_, err := f.stakingKeeper.Delegate(f.ctx, delegatorAddress, validator.BondedTokens(), stakingtypes.Unbonded, validator, true)
+	_, err = f.stakingKeeper.Delegate(f.ctx, delegatorAddress, validator.BondedTokens(), stakingtypes.Unbonded, validator, true)
 	assert.NilError(t, err)
 }
 
@@ -244,8 +256,8 @@ func getStaticValidator(f *deterministicFixture, t *testing.T) stakingtypes.Vali
 		ConsensusPubkey: pubkeyAny,
 		Jailed:          false,
 		Status:          stakingtypes.Bonded,
-		Tokens:          sdk.NewInt(100),
-		DelegatorShares: sdk.NewDecWithPrec(5, 2),
+		Tokens:          math.NewInt(100),
+		DelegatorShares: math.LegacyNewDecWithPrec(5, 2),
 		Description: stakingtypes.NewDescription(
 			"moniker",
 			"identity",
@@ -256,11 +268,11 @@ func getStaticValidator(f *deterministicFixture, t *testing.T) stakingtypes.Vali
 		UnbondingHeight: 10,
 		UnbondingTime:   time.Date(2022, 10, 1, 0, 0, 0, 0, time.UTC),
 		Commission: stakingtypes.NewCommission(
-			sdk.NewDecWithPrec(5, 2),
-			sdk.NewDecWithPrec(5, 2),
-			sdk.NewDecWithPrec(5, 2),
+			math.LegacyNewDecWithPrec(5, 2),
+			math.LegacyNewDecWithPrec(5, 2),
+			math.LegacyNewDecWithPrec(5, 2),
 		),
-		MinSelfDelegation: sdk.NewInt(10),
+		MinSelfDelegation: math.NewInt(10),
 	}
 
 	setValidator(f, t, validator)
@@ -278,8 +290,8 @@ func getStaticValidator2(f *deterministicFixture, t *testing.T) stakingtypes.Val
 		ConsensusPubkey: pubkeyAny,
 		Jailed:          true,
 		Status:          stakingtypes.Bonded,
-		Tokens:          sdk.NewInt(10012),
-		DelegatorShares: sdk.NewDecWithPrec(96, 2),
+		Tokens:          math.NewInt(10012),
+		DelegatorShares: math.LegacyNewDecWithPrec(96, 2),
 		Description: stakingtypes.NewDescription(
 			"moniker",
 			"identity",
@@ -290,11 +302,11 @@ func getStaticValidator2(f *deterministicFixture, t *testing.T) stakingtypes.Val
 		UnbondingHeight: 100132,
 		UnbondingTime:   time.Date(2025, 10, 1, 0, 0, 0, 0, time.UTC),
 		Commission: stakingtypes.NewCommission(
-			sdk.NewDecWithPrec(15, 2),
-			sdk.NewDecWithPrec(59, 2),
-			sdk.NewDecWithPrec(51, 2),
+			math.LegacyNewDecWithPrec(15, 2),
+			math.LegacyNewDecWithPrec(59, 2),
+			math.LegacyNewDecWithPrec(51, 2),
 		),
-		MinSelfDelegation: sdk.NewInt(1),
+		MinSelfDelegation: math.NewInt(1),
 	}
 	setValidator(f, t, validator)
 
@@ -312,7 +324,7 @@ func fundAccountAndDelegate(f *deterministicFixture, t *testing.T, delegator sdk
 	coins := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, amt))
 
 	assert.NilError(t, f.bankKeeper.MintCoins(f.ctx, minttypes.ModuleName, coins))
-	banktestutil.FundAccount(f.ctx, f.bankKeeper, delegator, coins)
+	assert.NilError(t, banktestutil.FundAccount(f.ctx, f.bankKeeper, delegator, coins))
 
 	shares, err := f.stakingKeeper.Delegate(f.ctx, delegator, amt, stakingtypes.Unbonded, validator, true)
 	return shares, err
@@ -417,8 +429,9 @@ func TestGRPCValidatorUnbondingDelegations(t *testing.T) {
 			delegator := testdata.AddressGenerator(rt).Draw(rt, "delegator")
 			shares, err := createDelegationAndDelegate(rt, f, t, delegator, validator)
 			assert.NilError(t, err)
-
-			_, _, err = f.stakingKeeper.Undelegate(f.ctx, delegator, validator.GetOperator(), shares)
+			valbz, err := f.stakingKeeper.ValidatorAddressCodec().StringToBytes(validator.GetOperator())
+			assert.NilError(t, err)
+			_, _, err = f.stakingKeeper.Undelegate(f.ctx, delegator, valbz, shares)
 			assert.NilError(t, err)
 		}
 
@@ -494,7 +507,9 @@ func TestGRPCUnbondingDelegation(t *testing.T) {
 		shares, err := createDelegationAndDelegate(rt, f, t, delegator, validator)
 		assert.NilError(t, err)
 
-		_, _, err = f.stakingKeeper.Undelegate(f.ctx, delegator, validator.GetOperator(), shares)
+		valbz, err := f.stakingKeeper.ValidatorAddressCodec().StringToBytes(validator.GetOperator())
+		assert.NilError(t, err)
+		_, _, err = f.stakingKeeper.Undelegate(f.ctx, delegator, valbz, shares)
 		assert.NilError(t, err)
 
 		req := &stakingtypes.QueryUnbondingDelegationRequest{
@@ -603,8 +618,9 @@ func TestGRPCDelegatorUnbondingDelegations(t *testing.T) {
 			validator := createAndSetValidatorWithStatus(rt, f, t, stakingtypes.Bonded)
 			shares, err := createDelegationAndDelegate(rt, f, t, delegator, validator)
 			assert.NilError(t, err)
-
-			_, _, err = f.stakingKeeper.Undelegate(f.ctx, delegator, validator.GetOperator(), shares)
+			valbz, err := f.stakingKeeper.ValidatorAddressCodec().StringToBytes(validator.GetOperator())
+			assert.NilError(t, err)
+			_, _, err = f.stakingKeeper.Undelegate(f.ctx, delegator, valbz, shares)
 			assert.NilError(t, err)
 		}
 
@@ -638,24 +654,24 @@ func TestGRPCHistoricalInfo(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		numVals := rapid.IntRange(1, 5).Draw(rt, "num-vals")
-		vals := make(stakingtypes.Validators, 0, numVals)
+		vals := stakingtypes.Validators{}
 		for i := 0; i < numVals; i++ {
 			validator := createAndSetValidatorWithStatus(rt, f, t, stakingtypes.Bonded)
-			vals = append(vals, validator)
+			vals.Validators = append(vals.Validators, validator)
 		}
 
 		historicalInfo := stakingtypes.HistoricalInfo{
 			Header: cmtproto.Header{},
-			Valset: vals,
+			Valset: vals.Validators,
 		}
 
 		height := rapid.Int64Min(0).Draw(rt, "height")
 
-		f.stakingKeeper.SetHistoricalInfo(
+		assert.NilError(t, f.stakingKeeper.SetHistoricalInfo(
 			f.ctx,
 			height,
 			&historicalInfo,
-		)
+		))
 
 		req := &stakingtypes.QueryHistoricalInfoRequest{
 			Height: height,
@@ -675,11 +691,11 @@ func TestGRPCHistoricalInfo(t *testing.T) {
 
 	height := int64(127)
 
-	f.stakingKeeper.SetHistoricalInfo(
+	assert.NilError(t, f.stakingKeeper.SetHistoricalInfo(
 		f.ctx,
 		height,
 		&historicalInfo,
-	)
+	))
 
 	req := &stakingtypes.QueryHistoricalInfoRequest{
 		Height: height,
@@ -812,7 +828,7 @@ func TestGRPCParams(t *testing.T) {
 			MaxValidators:     rapid.Uint32Min(1).Draw(rt, "max-validators"),
 			MaxEntries:        rapid.Uint32Min(1).Draw(rt, "max-entries"),
 			HistoricalEntries: rapid.Uint32Min(1).Draw(rt, "historical-entries"),
-			MinCommissionRate: sdk.NewDecWithPrec(rapid.Int64Range(0, 100).Draw(rt, "commission"), 2),
+			MinCommissionRate: math.LegacyNewDecWithPrec(rapid.Int64Range(0, 100).Draw(rt, "commission"), 2),
 		}
 
 		err := f.stakingKeeper.SetParams(f.ctx, params)
@@ -827,7 +843,7 @@ func TestGRPCParams(t *testing.T) {
 		MaxValidators:     85,
 		MaxEntries:        5,
 		HistoricalEntries: 5,
-		MinCommissionRate: sdk.NewDecWithPrec(5, 2),
+		MinCommissionRate: math.LegacyNewDecWithPrec(5, 2),
 	}
 
 	err := f.stakingKeeper.SetParams(f.ctx, params)

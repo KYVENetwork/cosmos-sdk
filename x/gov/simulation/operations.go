@@ -1,12 +1,9 @@
 package simulation
 
 import (
-	"errors"
 	"math"
 	"math/rand"
 	"time"
-
-	"cosmossdk.io/collections"
 
 	sdkmath "cosmossdk.io/math"
 
@@ -325,7 +322,12 @@ func SimulateMsgDeposit(
 			return simtypes.NoOpMsg(types.ModuleName, TypeMsgDeposit, "unable to generate proposalID"), nil, nil
 		}
 
-		deposit, skip, err := randomDeposit(r, ctx, ak, bk, k, simAccount.Address, false, false)
+		p, err := k.Proposals.Get(ctx, proposalID)
+		if err != nil {
+			return simtypes.NoOpMsg(types.ModuleName, TypeMsgDeposit, "unable to get proposal"), nil, err
+		}
+
+		deposit, skip, err := randomDeposit(r, ctx, ak, bk, k, simAccount.Address, false, p.Expedited)
 		switch {
 		case skip:
 			return simtypes.NoOpMsg(types.ModuleName, TypeMsgDeposit, "skip deposit"), nil, nil
@@ -573,6 +575,13 @@ func randomDeposit(
 
 	minDepositAmount := minDeposit[denomIndex].Amount
 
+	minDepositRatio, err := sdkmath.LegacyNewDecFromStr(params.GetMinDepositRatio())
+	if err != nil {
+		return nil, false, err
+	}
+
+	threshold := minDepositAmount.ToLegacyDec().Mul(minDepositRatio).TruncateInt()
+
 	minAmount := sdkmath.ZeroInt()
 	if useMinAmount {
 		minDepositPercent, err := sdkmath.LegacyNewDecFromStr(params.MinInitialDepositRatio)
@@ -589,7 +598,7 @@ func randomDeposit(
 	}
 	amount = amount.Add(minAmount)
 
-	if amount.GT(spendableBalance) {
+	if amount.GT(spendableBalance) || amount.LT(threshold) {
 		return nil, true, nil
 	}
 
@@ -603,7 +612,7 @@ func randomProposal(r *rand.Rand, k *keeper.Keeper, ctx sdk.Context) *v1.Proposa
 		proposals = append(proposals, &value)
 		return false, nil
 	})
-	if err != nil && !errors.Is(err, collections.ErrInvalidIterator) {
+	if err != nil {
 		panic(err)
 	}
 	if len(proposals) == 0 {
@@ -665,7 +674,7 @@ func randomWeightedVotingOptions(r *rand.Rand) v1.WeightedVoteOptions {
 	if w1 > 0 {
 		weightedVoteOptions = append(weightedVoteOptions, &v1.WeightedVoteOption{
 			Option: v1.OptionYes,
-			Weight: sdk.NewDecWithPrec(int64(w1), 2).String(),
+			Weight: sdkmath.LegacyNewDecWithPrec(int64(w1), 2).String(),
 		})
 	}
 	if w2 > 0 {

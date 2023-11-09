@@ -2,10 +2,13 @@ package flag
 
 import (
 	"context"
+	"fmt"
+	"strings"
+
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	basev1beta1 "cosmossdk.io/api/cosmos/base/v1beta1"
 	"cosmossdk.io/core/coins"
-	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type coinType struct{}
@@ -14,7 +17,7 @@ type coinValue struct {
 	value *basev1beta1.Coin
 }
 
-func (c coinType) NewValue(_ context.Context, _ *Builder) Value {
+func (c coinType) NewValue(context.Context, *Builder) Value {
 	return &coinValue{}
 }
 
@@ -35,6 +38,10 @@ func (c *coinValue) String() string {
 }
 
 func (c *coinValue) Set(stringValue string) error {
+	if strings.Contains(stringValue, ",") {
+		return fmt.Errorf("coin flag must be a single coin, specific multiple coins with multiple flags or spaces")
+	}
+
 	coin, err := coins.ParseCoin(stringValue)
 	if err != nil {
 		return err

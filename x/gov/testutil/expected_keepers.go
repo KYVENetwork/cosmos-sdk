@@ -31,11 +31,19 @@ type BankKeeper interface {
 type StakingKeeper interface {
 	types.StakingKeeper
 
-	BondDenom(ctx sdk.Context) string
-	TokensFromConsensusPower(ctx sdk.Context, power int64) math.Int
+	BondDenom(ctx context.Context) (string, error)
+	TokensFromConsensusPower(ctx context.Context, power int64) math.Int
 }
 
 // DistributionKeeper defines the expected distribution keeper
 type DistributionKeeper interface {
 	FundCommunityPool(ctx context.Context, amount sdk.Coins, sender sdk.AccAddress) error
+}
+
+// ProtocolStakingKeeper expected KYVE Protocol staking keeper (Protocol Validator and Delegator sets) (noalias)
+type ProtocolStakingKeeper interface {
+	GetActiveValidators(context.Context) []interface{}
+
+	TotalBondedTokens(context.Context) math.Int
+	GetDelegations(context.Context, string) ([]string, []math.LegacyDec)
 }

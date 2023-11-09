@@ -3,10 +3,11 @@ package v4_test
 import (
 	"testing"
 
-	storetypes "cosmossdk.io/store/types"
 	"github.com/bits-and-blooms/bitset"
 	gogotypes "github.com/cosmos/gogoproto/types"
 	"github.com/stretchr/testify/require"
+
+	storetypes "cosmossdk.io/store/types"
 
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -39,10 +40,6 @@ func TestMigrate(t *testing.T) {
 
 	err := v4.Migrate(ctx, cdc, store, params)
 	require.NoError(t, err)
-
-	// ensure old entries no longer exist and new bitmap chunk entries exist
-	entries := v4.GetValidatorMissedBlocks(ctx, cdc, store, consAddr, params)
-	require.Empty(t, entries)
 
 	for i := int64(0); i < params.SignedBlocksWindow; i++ {
 		chunkIndex := i / v4.MissedBlockBitmapChunkSize

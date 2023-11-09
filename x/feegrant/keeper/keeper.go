@@ -9,7 +9,6 @@ import (
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
-
 	"cosmossdk.io/x/feegrant"
 
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -29,7 +28,7 @@ type Keeper struct {
 
 var _ ante.FeegrantKeeper = &Keeper{}
 
-// NewKeeper creates a fee grant Keeper
+// NewKeeper creates a feegrant Keeper
 func NewKeeper(cdc codec.BinaryCodec, storeService store.KVStoreService, ak feegrant.AccountKeeper) Keeper {
 	return Keeper{
 		cdc:          cdc,
@@ -145,7 +144,7 @@ func (k Keeper) UpdateAllowance(ctx context.Context, granter, grantee sdk.AccAdd
 
 // revokeAllowance removes an existing grant
 func (k Keeper) revokeAllowance(ctx context.Context, granter, grantee sdk.AccAddress) error {
-	_, err := k.getGrant(ctx, granter, grantee)
+	grant, err := k.GetAllowance(ctx, granter, grantee)
 	if err != nil {
 		return err
 	}
@@ -155,6 +154,17 @@ func (k Keeper) revokeAllowance(ctx context.Context, granter, grantee sdk.AccAdd
 	err = store.Delete(key)
 	if err != nil {
 		return err
+	}
+
+	exp, err := grant.ExpiresAt()
+	if err != nil {
+		return err
+	}
+
+	if exp != nil {
+		if err := store.Delete(feegrant.FeeAllowancePrefixQueue(exp, feegrant.FeeAllowanceKey(grantee, granter)[1:])); err != nil {
+			return err
+		}
 	}
 
 	sdk.UnwrapSDKContext(ctx).EventManager().EmitEvent(
@@ -223,12 +233,7 @@ func (k Keeper) IterateAllFeeAllowances(ctx context.Context, cb func(grant feegr
 
 // UseGrantedFees will try to pay the given fee from the granter's account as requested by the grantee
 func (k Keeper) UseGrantedFees(ctx context.Context, granter, grantee sdk.AccAddress, fee sdk.Coins, msgs []sdk.Msg) error {
-	f, err := k.getGrant(ctx, granter, grantee)
-	if err != nil {
-		return err
-	}
-
-	grant, err := f.GetGrant()
+	grant, err := k.GetAllowance(ctx, granter, grantee)
 	if err != nil {
 		return err
 	}
@@ -312,10 +317,11 @@ func (k Keeper) addToFeeAllowanceQueue(ctx context.Context, grantKey []byte, exp
 }
 
 // RemoveExpiredAllowances iterates grantsByExpiryQueue and deletes the expired grants.
-func (k Keeper) RemoveExpiredAllowances(ctx context.Context) error {
+func (k Keeper) RemoveExpiredAllowances(ctx context.Context, limit int32) error {
 	exp := sdk.UnwrapSDKContext(ctx).BlockTime()
 	store := k.storeService.OpenKVStore(ctx)
 	iterator, err := store.Iterator(feegrant.FeeAllowanceQueueKeyPrefix, storetypes.InclusiveEndBytes(feegrant.AllowanceByExpTimeKey(&exp)))
+	var count int32
 	if err != nil {
 		return err
 	}
@@ -331,6 +337,12 @@ func (k Keeper) RemoveExpiredAllowances(ctx context.Context) error {
 		err = store.Delete(feegrant.FeeAllowanceKey(granter, grantee))
 		if err != nil {
 			return err
+		}
+
+		// limit the amount of iterations to avoid taking too much time
+		count++
+		if count == limit {
+			return nil
 		}
 	}
 	return nil

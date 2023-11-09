@@ -3,6 +3,9 @@ package simulation
 import (
 	"math/rand"
 
+	"cosmossdk.io/x/nft"
+	"cosmossdk.io/x/nft/keeper"
+
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -11,9 +14,6 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
-
-	"cosmossdk.io/x/nft"
-	"cosmossdk.io/x/nft/keeper"
 )
 
 const (
@@ -87,11 +87,21 @@ func SimulateMsgSend(
 			return simtypes.NoOpMsg(nft.ModuleName, TypeMsgSend, err.Error()), nil, err
 		}
 
+		senderStr, err := ak.AddressCodec().BytesToString(senderAcc.GetAddress().Bytes())
+		if err != nil {
+			return simtypes.NoOpMsg(nft.ModuleName, TypeMsgSend, err.Error()), nil, err
+		}
+
+		recieverStr, err := ak.AddressCodec().BytesToString(receiver.Address.Bytes())
+		if err != nil {
+			return simtypes.NoOpMsg(nft.ModuleName, TypeMsgSend, err.Error()), nil, err
+		}
+
 		msg := &nft.MsgSend{
 			ClassId:  n.ClassId,
 			Id:       n.Id,
-			Sender:   senderAcc.GetAddress().String(),
-			Receiver: receiver.Address.String(),
+			Sender:   senderStr,
+			Receiver: recieverStr,
 		}
 
 		tx, err := simtestutil.GenSignedMockTx(

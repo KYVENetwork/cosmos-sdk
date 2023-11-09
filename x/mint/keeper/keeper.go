@@ -5,10 +5,9 @@ import (
 	"fmt"
 
 	"cosmossdk.io/collections"
+	storetypes "cosmossdk.io/core/store"
 	"cosmossdk.io/log"
 	"cosmossdk.io/math"
-
-	storetypes "cosmossdk.io/core/store"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -83,28 +82,36 @@ func (k Keeper) Logger(ctx context.Context) log.Logger {
 
 // StakingTokenSupply implements an alias call to the underlying staking keeper's
 // StakingTokenSupply to be used in BeginBlocker.
-func (k Keeper) StakingTokenSupply(ctx context.Context) math.Int {
+func (k Keeper) StakingTokenSupply(ctx context.Context) (math.Int, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	return k.stakingKeeper.StakingTokenSupply(sdkCtx)
 }
 
 // BondedRatio implements an alias call to the underlying staking keeper's
 // BondedRatio to be used in BeginBlocker.
-func (k Keeper) BondedRatio(ctx context.Context) math.LegacyDec {
+func (k Keeper) BondedRatio(ctx context.Context) (math.LegacyDec, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	totalSupply := k.stakingKeeper.StakingTokenSupply(sdkCtx)
+	totalSupply, err := k.stakingKeeper.StakingTokenSupply(sdkCtx)
+	if err != nil {
+		return math.LegacyZeroDec(), err
+	}
 	if !totalSupply.IsPositive() {
-		return math.LegacyZeroDec()
+		return math.LegacyZeroDec(), nil
 	}
 
-	bondedTokens := math.LegacyNewDecFromInt(k.stakingKeeper.TotalBondedTokens(sdkCtx))
+	totalBondedToken, err := k.stakingKeeper.TotalBondedTokens(sdkCtx)
+	if err != nil {
+		return math.LegacyZeroDec(), err
+	}
+
+	bondedTokens := math.LegacyNewDecFromInt(totalBondedToken)
 	protocolBondedTokens := math.LegacyZeroDec()
 	if k.protocolStakingKeeper != nil {
 		protocolBondedTokens = math.LegacyNewDecFromInt(k.protocolStakingKeeper.TotalBondedTokens(sdkCtx))
 	}
 
-	return bondedTokens.Add(protocolBondedTokens).QuoInt(totalSupply)
+	return bondedTokens.Add(protocolBondedTokens).QuoInt(totalSupply), nil
 }
 
 // MintCoins implements an alias call to the underlying supply keeper's

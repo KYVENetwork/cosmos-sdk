@@ -3,8 +3,9 @@ package iavl
 import (
 	"fmt"
 
-	"cosmossdk.io/store/types"
 	"github.com/cosmos/iavl"
+
+	"cosmossdk.io/store/types"
 )
 
 var (
@@ -91,10 +92,6 @@ func (it *immutableTree) AvailableVersions() []int {
 
 func (it *immutableTree) LoadVersionForOverwriting(targetVersion int64) error {
 	panic("cannot call 'LoadVersionForOverwriting' on an immutable IAVL tree")
-}
-
-func (it *immutableTree) LazyLoadVersionForOverwriting(targetVersion int64) (int64, error) {
-	panic("cannot call 'LazyLoadVersionForOverwriting' on an immutable IAVL tree")
 }
 
 func (it *immutableTree) WorkingHash() []byte {

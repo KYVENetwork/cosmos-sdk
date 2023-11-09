@@ -1,4 +1,6 @@
-go 1.20
+go 1.21
+
+toolchain go1.21.0
 
 use (
 	.
@@ -14,7 +16,6 @@ use (
 	./simapp
 	./tests
 	./store
-	./tools/rosetta
 	./tools/cosmovisor
 	./tools/confix
 	./tools/hubl

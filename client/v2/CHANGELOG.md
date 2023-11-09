@@ -35,3 +35,8 @@ Ref: https://keepachangelog.com/en/1.0.0/
 # Changelog
 
 ## [Unreleased]
+
+## [v2.0.0-beta.1] - 2023-11-07
+
+This is the first tagged version of client/v2.
+It depends on the Cosmos SDK v0.50 release and fully supports AutoCLI.

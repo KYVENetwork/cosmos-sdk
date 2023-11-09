@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/math"
 	"cosmossdk.io/x/feegrant"
 
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -19,7 +20,7 @@ func TestAminoJSON(t *testing.T) {
 	legacytx.RegressionTestingAminoCodec = legacyAmino
 	tx := legacytx.StdTx{}
 	var msg sdk.Msg
-	allowanceAny, err := codectypes.NewAnyWithValue(&feegrant.BasicAllowance{SpendLimit: sdk.NewCoins(sdk.NewCoin("foo", sdk.NewInt(100)))})
+	allowanceAny, err := codectypes.NewAnyWithValue(&feegrant.BasicAllowance{SpendLimit: sdk.NewCoins(sdk.NewCoin("foo", math.NewInt(100)))})
 	require.NoError(t, err)
 
 	// Amino JSON encoding has changed in feegrant since v0.46.
@@ -33,13 +34,13 @@ func TestAminoJSON(t *testing.T) {
 	tx.Msgs = []sdk.Msg{msg}
 	require.Equal(t,
 		`{"account_number":"1","chain_id":"foo","fee":{"amount":[],"gas":"0"},"memo":"memo","msgs":[{"type":"cosmos-sdk/MsgGrantAllowance","value":{"allowance":{"type":"cosmos-sdk/BasicAllowance","value":{"spend_limit":[{"amount":"100","denom":"foo"}]}},"grantee":"cosmos1def","granter":"cosmos1abc"}}],"sequence":"1","timeout_height":"1"}`,
-		string(legacytx.StdSignBytes("foo", 1, 1, 1, legacytx.StdFee{}, []sdk.Msg{msg}, "memo", nil)),
+		string(legacytx.StdSignBytes("foo", 1, 1, 1, legacytx.StdFee{}, []sdk.Msg{msg}, "memo")),
 	)
 
 	msg = &feegrant.MsgRevokeAllowance{Granter: "cosmos1abc", Grantee: "cosmos1def"}
 	tx.Msgs = []sdk.Msg{msg}
 	require.Equal(t,
 		`{"account_number":"1","chain_id":"foo","fee":{"amount":[],"gas":"0"},"memo":"memo","msgs":[{"type":"cosmos-sdk/MsgRevokeAllowance","value":{"grantee":"cosmos1def","granter":"cosmos1abc"}}],"sequence":"1","timeout_height":"1"}`,
-		string(legacytx.StdSignBytes("foo", 1, 1, 1, legacytx.StdFee{}, []sdk.Msg{msg}, "memo", nil)),
+		string(legacytx.StdSignBytes("foo", 1, 1, 1, legacytx.StdFee{}, []sdk.Msg{msg}, "memo")),
 	)
 }

@@ -1,11 +1,16 @@
 run:
   tests: true
-  timeout: 10m
+  timeout: 15m
   sort-results: true
   allow-parallel-runners: true
   exclude-dir: testutil/testdata
   skip-files:
     - server/grpc/gogoreflection/fix_registration.go
+    - "fix_registration.go"
+    - "x/bank/migrations/v4/gen_state_test.go"
+    - ".*\\.pb\\.go$"
+    - ".*\\.pb\\.gw\\.go$"
+    - ".*\\.pulsar\\.go$"
 
 linters:
   disable-all: true
@@ -15,6 +20,7 @@ linters:
     - exportloopref
     - goconst
     - gocritic
+    - gci
     - gofumpt
     - gosec
     - gosimple
@@ -53,11 +59,18 @@ issues:
     - text: "leading space"
       linters:
         - nolintlint
-
   max-issues-per-linter: 10000
   max-same-issues: 10000
 
 linters-settings:
+  gci:
+    custom-order: true
+    sections:
+      - standard # Standard section: captures all standard packages.
+      - default # Default section: contains all imports that could not be matched to another section type.
+      - prefix(cosmossdk.io)
+      - prefix(github.com/cosmos/cosmos-sdk)
+
   gosec:
     # To select a subset of rules to run.
     # Available rules: https://github.com/securego/gosec#available-rules
@@ -102,7 +115,7 @@ linters-settings:
   gofumpt:
     extra-rules: true
   dogsled:
-    max-blank-identifiers: 5
+    max-blank-identifiers: 6
   maligned:
     suggest-new: true
   nolintlint:
@@ -112,7 +125,6 @@ linters-settings:
     require-specific: false
   gosimple:
     checks: ["all"]
-
   gocritic:
     disabled-checks:
       - regexpMust

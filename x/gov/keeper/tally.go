@@ -2,12 +2,11 @@ package keeper
 
 import (
 	"context"
-	"errors"
 
 	"cosmossdk.io/collections"
-
 	"cosmossdk.io/math"
 
+	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	v1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
@@ -30,10 +29,13 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 	currValidators := make(map[string]v1.ValidatorGovInfo)
 
 	// fetch all the bonded validators, insert them into currValidators
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	keeper.sk.IterateBondedValidatorsByPower(sdkCtx, func(index int64, validator stakingtypes.ValidatorI) (stop bool) {
-		currValidators[validator.GetOperator().String()] = v1.NewValidatorGovInfo(
-			validator.GetOperator(),
+	err = keeper.sk.IterateBondedValidatorsByPower(ctx, func(index int64, validator stakingtypes.ValidatorI) (stop bool) {
+		valBz, err := keeper.sk.ValidatorAddressCodec().StringToBytes(validator.GetOperator())
+		if err != nil {
+			return false
+		}
+		currValidators[validator.GetOperator()] = v1.NewValidatorGovInfo(
+			valBz,
 			validator.GetBondedTokens(),
 			validator.GetDelegatorShares(),
 			math.LegacyZeroDec(),
@@ -42,10 +44,14 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 
 		return false
 	})
+	if err != nil {
+		return false, false, tallyResults, err
+	}
+
 	// Fetch and insert all KYVE Protocol validators into list of current validators.
 	// NOTE: The key used is a normal "kyve1blah" address.
 	if keeper.protocolStakingKeeper != nil {
-		for _, rawVal := range keeper.protocolStakingKeeper.GetActiveValidators(sdkCtx) {
+		for _, rawVal := range keeper.protocolStakingKeeper.GetActiveValidators(ctx) {
 			// NOTE: We have to typecast to avoid creating import cycles when defining the function interfaces.
 			if val, ok := rawVal.(v1.ValidatorGovInfo); ok {
 				address := sdk.AccAddress(val.Address).String()
@@ -61,7 +67,10 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 			return false, err
 		}
 
-		valAddrStr := sdk.ValAddress(voter).String()
+		valAddrStr, err := keeper.sk.ValidatorAddressCodec().BytesToString(voter)
+		if err != nil {
+			return false, err
+		}
 		if val, ok := currValidators[valAddrStr]; ok {
 			val.Vote = vote.Options
 			currValidators[valAddrStr] = val
@@ -73,8 +82,8 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 		}
 
 		// iterate over all delegations from voter, deduct from any delegated-to validators
-		keeper.sk.IterateDelegations(sdkCtx, voter, func(index int64, delegation stakingtypes.DelegationI) (stop bool) {
-			valAddrStr := delegation.GetValidatorAddr().String()
+		err = keeper.sk.IterateDelegations(ctx, voter, func(index int64, delegation stakingtypes.DelegationI) (stop bool) {
+			valAddrStr := delegation.GetValidatorAddr()
 
 			if val, ok := currValidators[valAddrStr]; ok {
 				// There is no need to handle the special case that validator address equal to voter address.
@@ -95,16 +104,19 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 
 			return false
 		})
+		if err != nil {
+			return false, err
+		}
 
 		if keeper.protocolStakingKeeper != nil {
-			validators, amounts := keeper.protocolStakingKeeper.GetDelegations(sdkCtx, string(voter))
+			validators, amounts := keeper.protocolStakingKeeper.GetDelegations(ctx, string(voter))
 			for idx, address := range validators {
 				if val, ok := currValidators[address]; ok {
 					val.DelegatorDeductions = val.DelegatorDeductions.Add(amounts[idx])
 					currValidators[address] = val
 
 					for _, option := range vote.Options {
-						weight, _ := sdk.NewDecFromStr(option.Weight)
+						weight := sdkmath.LegacyMustNewDecFromStr(option.Weight)
 						subPower := amounts[idx].Mul(weight)
 						results[option.Option] = results[option.Option].Add(subPower)
 					}
@@ -116,7 +128,7 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 		return false, keeper.Votes.Remove(ctx, collections.Join(vote.ProposalId, sdk.AccAddress(voter)))
 	})
 
-	if err != nil && !errors.Is(err, collections.ErrInvalidIterator) {
+	if err != nil {
 		return false, false, tallyResults, err
 	}
 
@@ -143,10 +155,13 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 	}
 	tallyResults = v1.NewTallyResultFromMap(results)
 
-	totalBondedTokens := keeper.sk.TotalBondedTokens(sdkCtx)
+	totalBondedTokens, err := keeper.sk.TotalBondedTokens(ctx)
+	if err != nil {
+		return false, false, tallyResults, err
+	}
 	if keeper.protocolStakingKeeper != nil {
 		totalBondedTokens = totalBondedTokens.Add(
-			keeper.protocolStakingKeeper.TotalBondedTokens(sdkCtx),
+			keeper.protocolStakingKeeper.TotalBondedTokens(ctx),
 		)
 	}
 

@@ -69,27 +69,40 @@ func CanWithdrawInvariant(k Keeper) sdk.Invariant {
 
 		var remaining sdk.DecCoins
 
-		valDelegationAddrs := make(map[string][]sdk.AccAddress)
-		for _, del := range k.stakingKeeper.GetAllSDKDelegations(ctx) {
-			valAddr := del.GetValidatorAddr().String()
-			valDelegationAddrs[valAddr] = append(valDelegationAddrs[valAddr], del.GetDelegatorAddr())
+		valDelegationAddrs := make(map[string][][]byte)
+		allDelegations, err := k.stakingKeeper.GetAllSDKDelegations(ctx)
+		if err != nil {
+			panic(err)
+		}
+
+		for _, del := range allDelegations {
+			delAddr, err := k.authKeeper.AddressCodec().StringToBytes(del.GetDelegatorAddr())
+			if err != nil {
+				panic(err)
+			}
+			valAddr := del.GetValidatorAddr()
+			valDelegationAddrs[valAddr] = append(valDelegationAddrs[valAddr], delAddr)
 		}
 
 		// iterate over all validators
-		k.stakingKeeper.IterateValidators(ctx, func(_ int64, val stakingtypes.ValidatorI) (stop bool) {
-			_, _ = k.WithdrawValidatorCommission(ctx, val.GetOperator())
+		err = k.stakingKeeper.IterateValidators(ctx, func(_ int64, val stakingtypes.ValidatorI) (stop bool) {
+			valBz, err1 := k.stakingKeeper.ValidatorAddressCodec().StringToBytes(val.GetOperator())
+			if err != nil {
+				panic(err1)
+			}
+			_, _ = k.WithdrawValidatorCommission(ctx, valBz)
 
-			delegationAddrs, ok := valDelegationAddrs[val.GetOperator().String()]
+			delegationAddrs, ok := valDelegationAddrs[val.GetOperator()]
 			if ok {
 				for _, delAddr := range delegationAddrs {
-					if _, err := k.WithdrawDelegationRewards(ctx, delAddr, val.GetOperator()); err != nil {
+					if _, err := k.WithdrawDelegationRewards(ctx, delAddr, valBz); err != nil {
 						panic(err)
 					}
 				}
 			}
 
 			var err error
-			remaining, err = k.GetValidatorOutstandingRewardsCoins(ctx, val.GetOperator())
+			remaining, err = k.GetValidatorOutstandingRewardsCoins(ctx, valBz)
 			if err != nil {
 				panic(err)
 			}
@@ -100,6 +113,9 @@ func CanWithdrawInvariant(k Keeper) sdk.Invariant {
 
 			return false
 		})
+		if err != nil {
+			panic(err)
+		}
 
 		broken := len(remaining) > 0 && remaining[0].Amount.IsNegative()
 		return sdk.FormatInvariant(types.ModuleName, "can withdraw",
@@ -111,11 +127,19 @@ func CanWithdrawInvariant(k Keeper) sdk.Invariant {
 func ReferenceCountInvariant(k Keeper) sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
 		valCount := uint64(0)
-		k.stakingKeeper.IterateValidators(ctx, func(_ int64, val stakingtypes.ValidatorI) (stop bool) {
+		err := k.stakingKeeper.IterateValidators(ctx, func(_ int64, val stakingtypes.ValidatorI) (stop bool) {
 			valCount++
 			return false
 		})
-		dels := k.stakingKeeper.GetAllSDKDelegations(ctx)
+		if err != nil {
+			panic(err)
+		}
+
+		dels, err := k.stakingKeeper.GetAllSDKDelegations(ctx)
+		if err != nil {
+			panic(err)
+		}
+
 		slashCount := uint64(0)
 		k.IterateValidatorSlashEvents(ctx,
 			func(_ sdk.ValAddress, _ uint64, _ types.ValidatorSlashEvent) (stop bool) {

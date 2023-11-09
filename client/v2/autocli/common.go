@@ -4,20 +4,31 @@ import (
 	"context"
 	"fmt"
 
-	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
-	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/spf13/cobra"
-	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"sigs.k8s.io/yaml"
 
+	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
+	"cosmossdk.io/client/v2/internal/flags"
 	"cosmossdk.io/client/v2/internal/util"
+)
+
+type cmdType int
+
+const (
+	queryCmdType cmdType = iota
+	msgCmdType
 )
 
 func (b *Builder) buildMethodCommandCommon(descriptor protoreflect.MethodDescriptor, options *autocliv1.RpcCommandOptions, exec func(cmd *cobra.Command, input protoreflect.Message) error) (*cobra.Command, error) {
 	if options == nil {
 		// use the defaults
 		options = &autocliv1.RpcCommandOptions{}
+	}
+
+	short := options.Short
+	if short == "" {
+		short = fmt.Sprintf("Execute the %s RPC method", descriptor.Name())
 	}
 
 	long := options.Long
@@ -34,14 +45,15 @@ func (b *Builder) buildMethodCommandCommon(descriptor protoreflect.MethodDescrip
 	}
 
 	cmd := &cobra.Command{
-		Use:        use,
-		Long:       long,
-		Short:      options.Short,
-		Example:    options.Example,
-		Aliases:    options.Alias,
-		SuggestFor: options.SuggestFor,
-		Deprecated: options.Deprecated,
-		Version:    options.Version,
+		SilenceUsage: false,
+		Use:          use,
+		Long:         long,
+		Short:        short,
+		Example:      options.Example,
+		Aliases:      options.Alias,
+		SuggestFor:   options.SuggestFor,
+		Deprecated:   options.Deprecated,
+		Version:      options.Version,
 	}
 
 	cmd.SetContext(context.Background())
@@ -58,6 +70,37 @@ func (b *Builder) buildMethodCommandCommon(descriptor protoreflect.MethodDescrip
 			return err
 		}
 
+		// signer related logic, triggers only when there is a signer defined
+		if binder.SignerInfo.FieldName != "" {
+			// mark the signer flag as required if defined
+			// TODO(@julienrbrt): UX improvement by only marking the flag as required when there is more than one key in the keyring;
+			// when there is only one key, use that key by default.
+			if binder.SignerInfo.IsFlag {
+				if err := cmd.MarkFlagRequired(binder.SignerInfo.FieldName); err != nil {
+					return err
+				}
+
+				// the client context uses the from flag to determine the signer.
+				// this sets the signer flags to the from flag value if a custom signer flag is set.
+				if binder.SignerInfo.FieldName != flags.FlagFrom {
+					signer, err := cmd.Flags().GetString(binder.SignerInfo.FieldName)
+					if err != nil {
+						return fmt.Errorf("failed to get signer flag: %w", err)
+					}
+
+					if err := cmd.Flags().Set(flags.FlagFrom, signer); err != nil {
+						return err
+					}
+				}
+			} else {
+				// if the signer is not a flag, it is a positional argument
+				// we need to get the correct positional arguments
+				if err := cmd.Flags().Set(flags.FlagFrom, args[binder.SignerInfo.PositionalArgIndex]); err != nil {
+					return err
+				}
+			}
+		}
+
 		return exec(cmd, input)
 	}
 
@@ -70,54 +113,73 @@ func (b *Builder) buildMethodCommandCommon(descriptor protoreflect.MethodDescrip
 // automatically fill in missing commands.
 func (b *Builder) enhanceCommandCommon(
 	cmd *cobra.Command,
+	cmdType cmdType,
 	appOptions AppOptions,
 	customCmds map[string]*cobra.Command,
-	buildModuleCommand enhanceCommandFunc,
 ) error {
 	moduleOptions := appOptions.ModuleOptions
 	if len(moduleOptions) == 0 {
-		moduleOptions = map[string]*autocliv1.ModuleOptions{}
-		for name, module := range appOptions.Modules {
+		moduleOptions = make(map[string]*autocliv1.ModuleOptions)
+	}
+	for name, module := range appOptions.Modules {
+		if _, ok := moduleOptions[name]; !ok {
 			if module, ok := module.(HasAutoCLIConfig); ok {
 				moduleOptions[name] = module.AutoCLIOptions()
+			} else {
+				moduleOptions[name] = nil
 			}
 		}
 	}
 
-	modules := append(maps.Keys(appOptions.Modules), maps.Keys(moduleOptions)...)
-	for _, moduleName := range modules {
+	for moduleName, modOpts := range moduleOptions {
+		hasModuleOptions := modOpts != nil
+
 		// if we have an existing command skip adding one here
-		if findSubCommand(cmd, moduleName) != nil {
+		if subCmd := findSubCommand(cmd, moduleName); subCmd != nil {
+			if hasModuleOptions { // check if we need to enhance the existing command
+				if err := enhanceCustomCmd(b, subCmd, cmdType, modOpts); err != nil {
+					return err
+				}
+			}
+
 			continue
 		}
 
 		// if we have a custom command use that instead of generating one
-		if custom := customCmds[moduleName]; custom != nil {
-			// custom commands get added lower down
+		if custom, ok := customCmds[moduleName]; ok {
+			if hasModuleOptions { // check if we need to enhance the existing command
+				if err := enhanceCustomCmd(b, custom, cmdType, modOpts); err != nil {
+					return err
+				}
+			}
+
 			cmd.AddCommand(custom)
 			continue
 		}
 
-		// check for autocli options
-		modOpts := moduleOptions[moduleName]
-		if modOpts == nil {
+		// if we don't have module options, skip adding a command as we don't have anything to add
+		if !hasModuleOptions {
 			continue
 		}
 
-		if err := buildModuleCommand(b, moduleName, cmd, modOpts); err != nil {
-			return err
+		switch cmdType {
+		case queryCmdType:
+			if err := enhanceQuery(b, moduleName, cmd, modOpts); err != nil {
+				return err
+			}
+		case msgCmdType:
+			if err := enhanceMsg(b, moduleName, cmd, modOpts); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-type enhanceCommandFunc func(builder *Builder, moduleName string, cmd *cobra.Command, modOpts *autocliv1.ModuleOptions) error
-
 // enhanceQuery enhances the provided query command with the autocli commands for a module.
 func enhanceQuery(builder *Builder, moduleName string, cmd *cobra.Command, modOpts *autocliv1.ModuleOptions) error {
-	queryCmdDesc := modOpts.Query
-	if queryCmdDesc != nil {
+	if queryCmdDesc := modOpts.Query; queryCmdDesc != nil {
 		subCmd := topLevelCmd(moduleName, fmt.Sprintf("Querying commands for the %s module", moduleName))
 		if err := builder.AddQueryServiceCommands(subCmd, queryCmdDesc); err != nil {
 			return err
@@ -131,14 +193,33 @@ func enhanceQuery(builder *Builder, moduleName string, cmd *cobra.Command, modOp
 
 // enhanceMsg enhances the provided msg command with the autocli commands for a module.
 func enhanceMsg(builder *Builder, moduleName string, cmd *cobra.Command, modOpts *autocliv1.ModuleOptions) error {
-	txCmdDesc := modOpts.Tx
-	if txCmdDesc != nil {
+	if txCmdDesc := modOpts.Tx; txCmdDesc != nil {
 		subCmd := topLevelCmd(moduleName, fmt.Sprintf("Transactions commands for the %s module", moduleName))
 		if err := builder.AddMsgServiceCommands(subCmd, txCmdDesc); err != nil {
 			return err
 		}
 
 		cmd.AddCommand(subCmd)
+	}
+
+	return nil
+}
+
+// enhanceCustomCmd enhances the provided custom query or msg command autocli commands for a module.
+func enhanceCustomCmd(builder *Builder, cmd *cobra.Command, cmdType cmdType, modOpts *autocliv1.ModuleOptions) error {
+	switch cmdType {
+	case queryCmdType:
+		if modOpts.Query != nil && modOpts.Query.EnhanceCustomCommand {
+			if err := builder.AddQueryServiceCommands(cmd, modOpts.Query); err != nil {
+				return err
+			}
+		}
+	case msgCmdType:
+		if modOpts.Tx != nil && modOpts.Tx.EnhanceCustomCommand {
+			if err := builder.AddMsgServiceCommands(cmd, modOpts.Tx); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

@@ -2,7 +2,6 @@ package codec
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,9 +23,9 @@ import (
 
 // ProtoCodecMarshaler defines an interface for codecs that utilize Protobuf for both
 // binary and JSON encoding.
+// Deprecated: Use Codec instead.
 type ProtoCodecMarshaler interface {
 	Codec
-	InterfaceRegistry() types.InterfaceRegistry
 }
 
 // ProtoCodec defines a codec that utilizes Protobuf for both binary and JSON
@@ -35,10 +34,7 @@ type ProtoCodec struct {
 	interfaceRegistry types.InterfaceRegistry
 }
 
-var (
-	_ Codec               = &ProtoCodec{}
-	_ ProtoCodecMarshaler = &ProtoCodec{}
-)
+var _ Codec = (*ProtoCodec)(nil)
 
 // NewProtoCodec returns a reference to a new ProtoCodec
 func NewProtoCodec(interfaceRegistry types.InterfaceRegistry) *ProtoCodec {
@@ -194,27 +190,7 @@ func (pc *ProtoCodec) MarshalAminoJSON(msg gogoproto.Message) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	jsonBytes, err := encoder.Marshal(protoMsg)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: remove this sort once https://github.com/cosmos/cosmos-sdk/issues/2350#issuecomment-1542715157 lands
-	// the encoder should be rendering in lexical order
-	return sortJSON(jsonBytes)
-}
-
-// sortJSON sorts the JSON keys of the given JSON encoded byte slice.
-func sortJSON(toSortJSON []byte) ([]byte, error) {
-	var c interface{}
-	err := json.Unmarshal(toSortJSON, &c)
-	if err != nil {
-		return nil, err
-	}
-	js, err := json.Marshal(c)
-	if err != nil {
-		return nil, err
-	}
-	return js, nil
+	return encoder.Marshal(protoMsg)
 }
 
 // UnmarshalJSON implements JSONCodec.UnmarshalJSON method,
@@ -369,7 +345,8 @@ type grpcProtoCodec struct {
 func (g grpcProtoCodec) Marshal(v interface{}) ([]byte, error) {
 	switch m := v.(type) {
 	case proto.Message:
-		return proto.Marshal(m)
+		protov2MarshalOpts := proto.MarshalOptions{Deterministic: true}
+		return protov2MarshalOpts.Marshal(m)
 	case gogoproto.Message:
 		return g.cdc.Marshal(m)
 	default:

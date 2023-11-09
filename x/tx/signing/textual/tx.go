@@ -16,7 +16,6 @@ import (
 	msg "cosmossdk.io/api/cosmos/msg/v1"
 	signingv1beta1 "cosmossdk.io/api/cosmos/tx/signing/v1beta1"
 	txv1beta1 "cosmossdk.io/api/cosmos/tx/v1beta1"
-
 	"cosmossdk.io/x/tx/signing/textual/internal/textualpb"
 )
 
@@ -84,9 +83,9 @@ func (vr txValueRenderer) Format(ctx context.Context, v protoreflect.Value) ([]S
 		NonCriticalExtensionOptions: txBody.NonCriticalExtensionOptions,
 		HashOfRawBytes:              getHash(textualData.BodyBytes, textualData.AuthInfoBytes),
 	}
-	if txAuthInfo.Tip != nil {
-		envelope.Tip = txAuthInfo.Tip.Amount
-		envelope.Tipper = txAuthInfo.Tip.Tipper
+	if txAuthInfo.Tip != nil { //nolint:staticcheck // we still need this deprecated struct
+		envelope.Tip = txAuthInfo.Tip.Amount    //nolint:staticcheck // we still need this deprecated struct
+		envelope.Tipper = txAuthInfo.Tip.Tipper //nolint:staticcheck // we still need this deprecated struct
 	}
 	// Find all other tx signers than the current signer. In the case where our
 	// Textual signer is one key of a multisig, then otherSigners will include
@@ -245,7 +244,7 @@ func (vr txValueRenderer) Parse(ctx context.Context, screens []Screen) (protoref
 		},
 	}
 	if envelope.Tip != nil {
-		authInfo.Tip = &txv1beta1.Tip{
+		authInfo.Tip = &txv1beta1.Tip{ //nolint:staticcheck // we still need this deprecated struct
 			Amount: envelope.Tip,
 			Tipper: envelope.Tipper,
 		}

@@ -3,8 +3,9 @@ package v4_test
 import (
 	"testing"
 
-	storetypes "cosmossdk.io/store/types"
 	"github.com/stretchr/testify/require"
+
+	storetypes "cosmossdk.io/store/types"
 
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
@@ -27,6 +28,8 @@ func newMockSubspace(ps types.Params) mockSubspace {
 func (ms mockSubspace) GetParamSet(ctx sdk.Context, ps exported.ParamSet) {
 	*ps.(*types.Params) = ms.ps
 }
+
+func (ms mockSubspace) Get(ctx sdk.Context, key []byte, ptr interface{}) {}
 
 func TestMigrate(t *testing.T) {
 	encCfg := moduletestutil.MakeTestEncodingConfig(bank.AppModuleBasic{})

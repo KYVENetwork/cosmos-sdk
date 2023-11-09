@@ -3,8 +3,9 @@ package keeper
 import (
 	"context"
 
-	"cosmossdk.io/math"
 	abci "github.com/cometbft/cometbft/abci/types"
+
+	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -17,13 +18,12 @@ func (k Keeper) AllocateTokens(ctx context.Context, totalPreviousPower int64, bo
 	// fetch and clear the collected fees for distribution, since this is
 	// called in BeginBlock, collected fees will be from the previous block
 	// (and distributed to the previous proposer)
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	feeCollector := k.authKeeper.GetModuleAccount(ctx, k.feeCollectorName)
-	feesCollectedInt := k.bankKeeper.GetAllBalances(sdkCtx, feeCollector.GetAddress())
+	feesCollectedInt := k.bankKeeper.GetAllBalances(ctx, feeCollector.GetAddress())
 	feesCollected := sdk.NewDecCoinsFromCoins(feesCollectedInt...)
 
 	// transfer collected fees to the distribution module account
-	err := k.bankKeeper.SendCoinsFromModuleToModule(sdkCtx, k.feeCollectorName, types.ModuleName, feesCollectedInt)
+	err := k.bankKeeper.SendCoinsFromModuleToModule(ctx, k.feeCollectorName, types.ModuleName, feesCollectedInt)
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,10 @@ func (k Keeper) AllocateTokens(ctx context.Context, totalPreviousPower int64, bo
 	//
 	// Ref: https://github.com/cosmos/cosmos-sdk/pull/3099#discussion_r246276376
 	for _, vote := range bondedVotes {
-		validator := k.stakingKeeper.ValidatorByConsAddr(sdkCtx, vote.Validator.Address)
+		validator, err := k.stakingKeeper.ValidatorByConsAddr(ctx, vote.Validator.Address)
+		if err != nil {
+			return err
+		}
 
 		// TODO: Consider micro-slashing for missing votes.
 		//
@@ -64,7 +67,7 @@ func (k Keeper) AllocateTokens(ctx context.Context, totalPreviousPower int64, bo
 		powerFraction := math.LegacyNewDec(vote.Validator.Power).QuoTruncate(math.LegacyNewDec(totalPreviousPower))
 		reward := feeMultiplier.MulDecTruncate(powerFraction)
 
-		err := k.AllocateTokensToValidator(ctx, validator, reward)
+		err = k.AllocateTokensToValidator(ctx, validator, reward)
 		if err != nil {
 			return err
 		}
@@ -84,34 +87,39 @@ func (k Keeper) AllocateTokensToValidator(ctx context.Context, val stakingtypes.
 	commission := tokens.MulDec(val.GetCommission())
 	shared := tokens.Sub(commission)
 
+	valBz, err := k.stakingKeeper.ValidatorAddressCodec().StringToBytes(val.GetOperator())
+	if err != nil {
+		return err
+	}
+
 	// update current commission
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	sdkCtx.EventManager().EmitEvent(
 		sdk.NewEvent(
 			types.EventTypeCommission,
 			sdk.NewAttribute(sdk.AttributeKeyAmount, commission.String()),
-			sdk.NewAttribute(types.AttributeKeyValidator, val.GetOperator().String()),
+			sdk.NewAttribute(types.AttributeKeyValidator, val.GetOperator()),
 		),
 	)
-	currentCommission, err := k.GetValidatorAccumulatedCommission(ctx, val.GetOperator())
+	currentCommission, err := k.GetValidatorAccumulatedCommission(ctx, valBz)
 	if err != nil {
 		return err
 	}
 
 	currentCommission.Commission = currentCommission.Commission.Add(commission...)
-	err = k.SetValidatorAccumulatedCommission(ctx, val.GetOperator(), currentCommission)
+	err = k.SetValidatorAccumulatedCommission(ctx, valBz, currentCommission)
 	if err != nil {
 		return err
 	}
 
 	// update current rewards
-	currentRewards, err := k.GetValidatorCurrentRewards(ctx, val.GetOperator())
+	currentRewards, err := k.GetValidatorCurrentRewards(ctx, valBz)
 	if err != nil {
 		return err
 	}
 
 	currentRewards.Rewards = currentRewards.Rewards.Add(shared...)
-	err = k.SetValidatorCurrentRewards(ctx, val.GetOperator(), currentRewards)
+	err = k.SetValidatorCurrentRewards(ctx, valBz, currentRewards)
 	if err != nil {
 		return err
 	}
@@ -121,15 +129,15 @@ func (k Keeper) AllocateTokensToValidator(ctx context.Context, val stakingtypes.
 		sdk.NewEvent(
 			types.EventTypeRewards,
 			sdk.NewAttribute(sdk.AttributeKeyAmount, tokens.String()),
-			sdk.NewAttribute(types.AttributeKeyValidator, val.GetOperator().String()),
+			sdk.NewAttribute(types.AttributeKeyValidator, val.GetOperator()),
 		),
 	)
 
-	outstanding, err := k.GetValidatorOutstandingRewards(ctx, val.GetOperator())
+	outstanding, err := k.GetValidatorOutstandingRewards(ctx, valBz)
 	if err != nil {
 		return err
 	}
 
 	outstanding.Rewards = outstanding.Rewards.Add(tokens...)
-	return k.SetValidatorOutstandingRewards(ctx, val.GetOperator(), outstanding)
+	return k.SetValidatorOutstandingRewards(ctx, valBz, outstanding)
 }

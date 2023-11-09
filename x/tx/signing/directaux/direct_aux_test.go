@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"testing"
 
-	"cosmossdk.io/core/address"
 	"github.com/cosmos/cosmos-proto/anyutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -17,7 +16,7 @@ import (
 	"cosmossdk.io/api/cosmos/crypto/secp256k1"
 	signingv1beta1 "cosmossdk.io/api/cosmos/tx/signing/v1beta1"
 	txv1beta1 "cosmossdk.io/api/cosmos/tx/v1beta1"
-
+	"cosmossdk.io/core/address"
 	"cosmossdk.io/x/tx/signing"
 	"cosmossdk.io/x/tx/signing/directaux"
 )
@@ -55,7 +54,7 @@ func TestDirectAuxHandler(t *testing.T) {
 		GasLimit: 20000,
 		Payer:    feePayerAddr,
 	}
-	tip := &txv1beta1.Tip{Amount: []*basev1beta1.Coin{{Denom: "tip-token", Amount: "10"}}}
+	tip := &txv1beta1.Tip{Amount: []*basev1beta1.Coin{{Denom: "tip-token", Amount: "10"}}} //nolint:staticcheck // we still need this deprecated struct
 
 	txBody := &txv1beta1.TxBody{
 		Messages: []*anypb.Any{msg},

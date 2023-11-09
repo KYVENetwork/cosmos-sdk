@@ -8,11 +8,15 @@ import (
 	signingv1beta1 "cosmossdk.io/api/cosmos/tx/signing/v1beta1"
 	txv1beta1 "cosmossdk.io/api/cosmos/tx/v1beta1"
 	txsigning "cosmossdk.io/x/tx/signing"
+
 	"github.com/cosmos/cosmos-sdk/types/tx"
 )
 
 // GetSigningTxData returns an x/tx/signing.TxData representation of a transaction for use in the signing
-// API defined in x/tx.
+// API defined in x/tx.  The reason for all of this conversion is that x/tx depends on the protoreflect API
+// defined in google.golang.org/protobuf while x/auth/tx depends on the legacy proto API defined in
+// github.com/gogo/protobuf and the downstream SDK fork of that library, github.com/cosmos/gogoproto.
+// Therefore we need to convert between the two APIs.
 func (w *wrapper) GetSigningTxData() txsigning.TxData {
 	body := w.tx.Body
 	authInfo := w.tx.AuthInfo
@@ -50,23 +54,6 @@ func (w *wrapper) GetSigningTxData() txsigning.TxData {
 		}
 	}
 
-	var txTip *txv1beta1.Tip
-	tip := authInfo.Tip
-	if tip != nil {
-		tipCoins := tip.GetAmount()
-		tipAmount := make([]*basev1beta1.Coin, len(tipCoins))
-		for i, coin := range tipCoins {
-			tipAmount[i] = &basev1beta1.Coin{
-				Denom:  coin.Denom,
-				Amount: coin.Amount.String(),
-			}
-		}
-		txTip = &txv1beta1.Tip{
-			Amount: tipAmount,
-			Tipper: tip.Tipper,
-		}
-	}
-
 	txSignerInfos := make([]*txv1beta1.SignerInfo, len(authInfo.SignerInfos))
 	for i, signerInfo := range authInfo.SignerInfos {
 		modeInfo := &txv1beta1.ModeInfo{}
@@ -90,7 +77,6 @@ func (w *wrapper) GetSigningTxData() txsigning.TxData {
 			Payer:    authInfo.Fee.Payer,
 			Granter:  authInfo.Fee.Granter,
 		},
-		Tip: txTip,
 	}
 
 	txBody := &txv1beta1.TxBody{

@@ -3,15 +3,15 @@ package keeper
 import (
 	"context"
 
-	"cosmossdk.io/collections"
-	"cosmossdk.io/core/event"
-	storetypes "cosmossdk.io/core/store"
-	"cosmossdk.io/errors"
-
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"cosmossdk.io/collections"
+	"cosmossdk.io/core/event"
+	storetypes "cosmossdk.io/core/store"
+	"cosmossdk.io/errors"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/x/consensus/exported"
@@ -68,7 +68,10 @@ func (k Keeper) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams) (*
 		return nil, errors.Wrapf(govtypes.ErrInvalidSigner, "invalid authority; expected %s, got %s", k.GetAuthority(), msg.Authority)
 	}
 
-	consensusParams := msg.ToProtoConsensusParams()
+	consensusParams, err := msg.ToProtoConsensusParams()
+	if err != nil {
+		return nil, err
+	}
 	if err := cmttypes.ConsensusParamsFromProto(consensusParams).ValidateBasic(); err != nil {
 		return nil, err
 	}

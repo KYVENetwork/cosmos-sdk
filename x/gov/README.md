@@ -16,14 +16,14 @@ on proposals on a 1 token 1 vote basis. Next is a list of features the module
 currently supports:
 
 * **Proposal submission:** Users can submit proposals with a deposit. Once the
-minimum deposit is reached, the proposal enters voting period.
-* **Vote:** Participants can vote on proposals that reached MinDeposit
+minimum deposit is reached, the proposal enters voting period. The minimum deposit can be reached by collecting deposits from different users (including proposer) within deposit period.
+* **Vote:** Participants can vote on proposals that reached MinDeposit and entered voting period.
 * **Inheritance and penalties:** Delegators inherit their validator's vote if
 they don't vote themselves.
 * **Claiming deposit:** Users that deposited on proposals can recover their
-deposits if the proposal was accepted or rejected. If the proposal was vetoed, or never entered voting period, the deposit is burned.
+deposits if the proposal was accepted or rejected. If the proposal was vetoed, or never entered voting period (minimum deposit not reached within deposit period), the deposit is burned.
 
-This module will be used in the Cosmos Hub, the first Hub in the Cosmos network.
+This module is in use on the Cosmos Hub (a.k.a [gaia](https://github.com/cosmos/gaia)).
 Features that may be added in the future are described in [Future Improvements](#future-improvements).
 
 ## Contents
@@ -494,11 +494,13 @@ And the pseudocode for the `ProposalProcessingQueue`:
 
 ### Legacy Proposal
 
+:::warning
+Legacy proposals are deprecated. Use the new proposal flow by granting the governance module the right to execute the message.
+:::
+
 A legacy proposal is the old implementation of governance proposal.
 Contrary to proposal that can contain any messages, a legacy proposal allows to submit a set of pre-defined proposals.
-These proposal are defined by their types.
-
-While proposals should use the new implementation of the governance proposal, we need still to use legacy proposal in order to submit a `software-upgrade` and a `cancel-software-upgrade` proposal.
+These proposals are defined by their types and handled by handlers that are registered in the gov v1beta1 router.
 
 More information on how to submit proposals in the [client section](#client).
 
@@ -516,6 +518,7 @@ All `sdk.Msgs` passed into the `messages` field of a `MsgSubmitProposal` message
 must be registered in the app's `MsgServiceRouter`. Each of these messages must
 have one signer, namely the gov module account. And finally, the metadata length
 must not be larger than the `maxMetadataLen` config passed into the gov keeper.
+The `initialDeposit` must be strictly positive and conform to the accepted denom of the `MinDeposit` param.
 
 **State modifications:**
 
@@ -527,57 +530,16 @@ must not be larger than the `maxMetadataLen` config passed into the gov keeper.
     * Push `proposalID` in `ProposalProcessingQueue`
 * Transfer `InitialDeposit` from the `Proposer` to the governance `ModuleAccount`
 
-A `MsgSubmitProposal` transaction can be handled according to the following
-pseudocode.
-
-```go
-// PSEUDOCODE //
-// Check if MsgSubmitProposal is valid. If it is, create proposal //
-
-upon receiving txGovSubmitProposal from sender do
-
-  if !correctlyFormatted(txGovSubmitProposal)
-    // check if proposal is correctly formatted and the messages have routes to other modules. Includes fee payment.
-    // check if all messages' unique Signer is the gov acct.
-    // check if the metadata is not too long.
-    throw
-
-  initialDeposit = txGovSubmitProposal.InitialDeposit
-  if (initialDeposit.Atoms <= 0) OR (sender.AtomBalance < initialDeposit.Atoms)
-    // InitialDeposit is negative or null OR sender has insufficient funds
-    throw
-
-  if (txGovSubmitProposal.Type != ProposalTypePlainText) OR (txGovSubmitProposal.Type != ProposalTypeSoftwareUpgrade)
-
-  sender.AtomBalance -= initialDeposit.Atoms
-
-  depositParam = load(GlobalParams, 'DepositParam')
-
-  proposalID = generate new proposalID
-  proposal = NewProposal()
-
-  proposal.Messages = txGovSubmitProposal.Messages
-  proposal.Metadata = txGovSubmitProposal.Metadata
-  proposal.TotalDeposit = initialDeposit
-  proposal.SubmitTime = <CurrentTime>
-  proposal.DepositEndTime = <CurrentTime>.Add(depositParam.MaxDepositPeriod)
-  proposal.Deposits.append({initialDeposit, sender})
-  proposal.Submitter = sender
-  proposal.YesVotes = 0
-  proposal.NoVotes = 0
-  proposal.NoWithVetoVotes = 0
-  proposal.AbstainVotes = 0
-  proposal.CurrentStatus = ProposalStatusOpen
-
-  store(Proposals, <proposalID|'proposal'>, proposal) // Store proposal in Proposals mapping
-  return proposalID
-```
-
 ### Deposit
 
-Once a proposal is submitted, if
-`Proposal.TotalDeposit < ActiveParam.MinDeposit`, Atom holders can send
+Once a proposal is submitted, if `Proposal.TotalDeposit < ActiveParam.MinDeposit`, Atom holders can send
 `MsgDeposit` transactions to increase the proposal's deposit.
+
+A deposit is accepted iff:
+
+* The proposal exists
+* The proposal is not in the voting period
+* The deposited coins are conform to the accepted denom from the `MinDeposit` param
 
 ```protobuf reference
 https://github.com/cosmos/cosmos-sdk/blob/v0.47.0-rc1/proto/cosmos/gov/v1/tx.proto#L134-L147
@@ -591,55 +553,6 @@ https://github.com/cosmos/cosmos-sdk/blob/v0.47.0-rc1/proto/cosmos/gov/v1/tx.pro
 * If `MinDeposit` is reached:
     * Push `proposalID` in `ProposalProcessingQueueEnd`
 * Transfer `Deposit` from the `proposer` to the governance `ModuleAccount`
-
-A `MsgDeposit` transaction has to go through a number of checks to be valid.
-These checks are outlined in the following pseudocode.
-
-```go
-// PSEUDOCODE //
-// Check if MsgDeposit is valid. If it is, increase deposit and check if MinDeposit is reached
-
-upon receiving txGovDeposit from sender do
-  // check if proposal is correctly formatted. Includes fee payment.
-
-  if !correctlyFormatted(txGovDeposit)
-    throw
-
-  proposal = load(Proposals, <txGovDeposit.ProposalID|'proposal'>) // proposal is a const key, proposalID is variable
-
-  if (proposal == nil)
-    // There is no proposal for this proposalID
-    throw
-
-  if (txGovDeposit.Deposit.Atoms <= 0) OR (sender.AtomBalance < txGovDeposit.Deposit.Atoms) OR (proposal.CurrentStatus != ProposalStatusOpen)
-
-    // deposit is negative or null
-    // OR sender has insufficient funds
-    // OR proposal is not open for deposit anymore
-
-    throw
-
-  depositParam = load(GlobalParams, 'DepositParam')
-
-  if (CurrentBlock >= proposal.SubmitBlock + depositParam.MaxDepositPeriod)
-    proposal.CurrentStatus = ProposalStatusClosed
-
-  else
-    // sender can deposit
-    sender.AtomBalance -= txGovDeposit.Deposit.Atoms
-
-    proposal.Deposits.append({txGovVote.Deposit, sender})
-    proposal.TotalDeposit.Plus(txGovDeposit.Deposit)
-
-    if (proposal.TotalDeposit >= depositParam.MinDeposit)
-      // MinDeposit is reached, vote opens
-
-      proposal.VotingStartBlock = CurrentBlock
-      proposal.CurrentStatus = ProposalStatusActive
-      ProposalProcessingQueue.push(txGovDeposit.ProposalID)
-
-  store(Proposals, <txGovVote.ProposalID|'proposal'>, proposal)
-```
 
 ### Vote
 
@@ -658,35 +571,6 @@ https://github.com/cosmos/cosmos-sdk/blob/v0.47.0-rc1/proto/cosmos/gov/v1/tx.pro
 :::note
 Gas cost for this message has to take into account the future tallying of the vote in EndBlocker.
 :::
-
-Next is a pseudocode outline of the way `MsgVote` transactions are handled:
-
-```go
-  // PSEUDOCODE //
-  // Check if MsgVote is valid. If it is, count vote//
-
-  upon receiving txGovVote from sender do
-    // check if proposal is correctly formatted. Includes fee payment.
-
-    if !correctlyFormatted(txGovDeposit)
-      throw
-
-    proposal = load(Proposals, <txGovDeposit.ProposalID|'proposal'>)
-
-    if (proposal == nil)
-      // There is no proposal for this proposalID
-      throw
-
-
-    if  (proposal.CurrentStatus == ProposalStatusActive)
-
-
-        // Sender can vote if
-        // Proposal is active
-        // Sender has some bonds
-
-        store(Governance, <txGovVote.ProposalID|'addresses'|sender>, txGovVote.Vote)   // Voters can vote multiple times. Re-voting overrides previous vote. This is ok because tallying is done once at the end.
-```
 
 ## Events
 
@@ -768,6 +652,8 @@ The governance module contains the following parameters:
 | burn_proposal_deposit_prevote | bool             | false                                    |
 | burn_vote_quorum              | bool             | false                                   |
 | burn_vote_veto                | bool             | true                                    |
+| min_initial_deposit_ratio                | string             | "0.1"                                    |
+
 
 **NOTE**: The governance module contains parameters that are objects unlike other
 modules. If only a subset of parameters are desired to be changed, only they need
@@ -1179,6 +1065,10 @@ where `proposal.json` contains:
 
 :::note
 By default the metadata, summary and title are both limited by 255 characters, this can be overridden by the application developer.
+:::
+
+:::tip
+When metadata is not specified, the title is limited to 255 characters and the summary 40x the title length.
 :::
 
 ##### submit-legacy-proposal

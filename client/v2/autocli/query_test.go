@@ -1,20 +1,22 @@
 package autocli
 
 import (
-	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
-	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/testing/protocmp"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/golden"
 
+	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
+	queryv1beta1 "cosmossdk.io/api/cosmos/base/query/v1beta1"
+	basev1beta1 "cosmossdk.io/api/cosmos/base/v1beta1"
 	"cosmossdk.io/client/v2/internal/testpb"
 )
 
@@ -22,6 +24,20 @@ var buildModuleQueryCommand = func(moduleName string, b *Builder) (*cobra.Comman
 	cmd := topLevelCmd(moduleName, fmt.Sprintf("Querying commands for the %s module", moduleName))
 
 	err := b.AddQueryServiceCommands(cmd, testCmdDesc)
+	return cmd, err
+}
+
+var buildModuleQueryCommandOptional = func(moduleName string, b *Builder) (*cobra.Command, error) {
+	cmd := topLevelCmd(moduleName, fmt.Sprintf("Querying commands for the %s module", moduleName))
+
+	err := b.AddQueryServiceCommands(cmd, testCmdDescOptional)
+	return cmd, err
+}
+
+var buildModuleVargasOptional = func(moduleName string, b *Builder) (*cobra.Command, error) {
+	cmd := topLevelCmd(moduleName, fmt.Sprintf("Querying commands for the %s module", moduleName))
+
+	err := b.AddQueryServiceCommands(cmd, testCmdDescInvalidOptAndVargas)
 	return cmd, err
 }
 
@@ -117,21 +133,155 @@ var testCmdDesc = &autocliv1.ServiceCommandDescriptor{
 	},
 }
 
+var testCmdDescOptional = &autocliv1.ServiceCommandDescriptor{
+	Service: testpb.Query_ServiceDesc.ServiceName,
+	RpcCommandOptions: []*autocliv1.RpcCommandOptions{
+		{
+			RpcMethod:  "Echo",
+			Use:        "echo [pos1] [pos2] [pos3...]",
+			Version:    "1.0",
+			Alias:      []string{"e"},
+			SuggestFor: []string{"eco"},
+			Example:    "echo 1 abc {}",
+			Short:      "echo echos the value provided by the user",
+			Long:       "echo echos the value provided by the user as a proto JSON object with populated with the provided fields and positional arguments",
+			PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+				{
+					ProtoField: "positional1",
+				},
+				{
+					ProtoField: "positional2",
+					Optional:   true,
+				},
+			},
+		},
+	},
+}
+
+var testCmdDescInvalidOptAndVargas = &autocliv1.ServiceCommandDescriptor{
+	Service: testpb.Query_ServiceDesc.ServiceName,
+	RpcCommandOptions: []*autocliv1.RpcCommandOptions{
+		{
+			RpcMethod:  "Echo",
+			Use:        "echo [pos1] [pos2] [pos3...]",
+			Version:    "1.0",
+			Alias:      []string{"e"},
+			SuggestFor: []string{"eco"},
+			Example:    "echo 1 abc {}",
+			Short:      "echo echos the value provided by the user",
+			Long:       "echo echos the value provided by the user as a proto JSON object with populated with the provided fields and positional arguments",
+			PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+				{
+					ProtoField: "positional1",
+				},
+				{
+					ProtoField: "positional2",
+					Optional:   true,
+				},
+				{
+					ProtoField: "positional3_varargs",
+					Varargs:    true,
+				},
+			},
+		},
+	},
+}
+
 func TestCoin(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand,
+	fixture := initFixture(t)
+
+	_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
+		"echo",
+		"1",
+		"abc",
+		"1234foo,4321bar",
+		"100uatom",
+		"--a-coin", "100000foo",
+	)
+	assert.ErrorContains(t, err, "coin flag must be a single coin, specific multiple coins with multiple flags or spaces")
+
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1",
 		"abc",
 		"1234foo",
 		"4321bar",
+		"100uatom",
 		"--a-coin", "100000foo",
-		"--duration", "4h3s",
+		"--coins", "100000bar",
+		"--coins", "100uatom",
 	)
-	assert.DeepEqual(t, conn.lastRequest, conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+	assert.NilError(t, err)
+	assert.DeepEqual(t, fixture.conn.lastRequest, fixture.conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+	expectedResp := &testpb.EchoResponse{
+		Request: &testpb.EchoRequest{
+			Positional1: 1,
+			Positional2: "abc",
+			Positional3Varargs: []*basev1beta1.Coin{
+				{Amount: "1234", Denom: "foo"},
+				{Amount: "4321", Denom: "bar"},
+				{Amount: "100", Denom: "uatom"},
+			},
+			ACoin: &basev1beta1.Coin{
+				Amount: "100000",
+				Denom:  "foo",
+			},
+			Coins: []*basev1beta1.Coin{
+				{Amount: "100000", Denom: "bar"},
+				{Amount: "100", Denom: "uatom"},
+			},
+			Page: &queryv1beta1.PageRequest{},
+			I32:  3,
+			U64:  5,
+		},
+	}
+	assert.DeepEqual(t, fixture.conn.lastResponse.(*testpb.EchoResponse), expectedResp, protocmp.Transform())
+}
+
+func TestOptional(t *testing.T) {
+	fixture := initFixture(t)
+
+	_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommandOptional,
+		"echo",
+		"1",
+		"abc",
+	)
+	assert.NilError(t, err)
+	request := fixture.conn.lastRequest.(*testpb.EchoRequest)
+	assert.Equal(t, request.Positional2, "abc")
+	assert.DeepEqual(t, fixture.conn.lastRequest, fixture.conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommandOptional,
+		"echo",
+		"1",
+	)
+	assert.NilError(t, err)
+
+	request = fixture.conn.lastRequest.(*testpb.EchoRequest)
+	assert.Equal(t, request.Positional2, "")
+	assert.DeepEqual(t, fixture.conn.lastRequest, fixture.conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommandOptional,
+		"echo",
+		"1",
+		"abc",
+		"extra-arg",
+	)
+	assert.ErrorContains(t, err, "accepts between 1 and 2 arg(s), received 3")
+
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleVargasOptional,
+		"echo",
+		"1",
+		"abc",
+		"extra-arg",
+	)
+	assert.ErrorContains(t, err, "optional positional argument positional2 must be the last argument")
 }
 
 func TestMap(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand,
+	fixture := initFixture(t)
+
+	_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1",
 		"abc",
@@ -143,9 +293,10 @@ func TestMap(t *testing.T) {
 		"--map-string-coin", "sec=100000bar",
 		"--map-string-coin", "multi=100000bar,flag=100000foo",
 	)
-	assert.DeepEqual(t, conn.lastRequest, conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+	assert.NilError(t, err)
+	assert.DeepEqual(t, fixture.conn.lastRequest, fixture.conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
 
-	conn = testExecCommon(t, buildModuleQueryCommand,
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1",
 		"abc",
@@ -155,9 +306,9 @@ func TestMap(t *testing.T) {
 		"--map-string-coin", "baz,100000foo",
 		"--map-string-coin", "sec=100000bar",
 	)
-	assert.Equal(t, "Error: invalid argument \"baz,100000foo\" for \"--map-string-coin\" flag: invalid format, expected key=value\n", conn.errorOut.String())
+	assert.ErrorContains(t, err, "invalid argument \"baz,100000foo\" for \"--map-string-coin\" flag: invalid format, expected key=value")
 
-	conn = testExecCommon(t, buildModuleQueryCommand,
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1",
 		"abc",
@@ -167,9 +318,9 @@ func TestMap(t *testing.T) {
 		"--map-string-coin", "baz=100000foo",
 		"--map-string-coin", "sec=100000bar",
 	)
-	assert.Equal(t, "Error: invalid argument \"bar=not-unint32\" for \"--map-string-uint32\" flag: strconv.ParseUint: parsing \"not-unint32\": invalid syntax\n", conn.errorOut.String())
+	assert.ErrorContains(t, err, "invalid argument \"bar=not-unint32\" for \"--map-string-uint32\" flag: strconv.ParseUint: parsing \"not-unint32\": invalid syntax")
 
-	conn = testExecCommon(t, buildModuleQueryCommand,
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1",
 		"abc",
@@ -179,25 +330,15 @@ func TestMap(t *testing.T) {
 		"--map-string-coin", "baz=100000foo",
 		"--map-string-coin", "sec=100000bar",
 	)
-	assert.Equal(t, "Error: invalid argument \"bar=123.9\" for \"--map-string-uint32\" flag: strconv.ParseUint: parsing \"123.9\": invalid syntax\n", conn.errorOut.String())
+	assert.ErrorContains(t, err, "invalid argument \"bar=123.9\" for \"--map-string-uint32\" flag: strconv.ParseUint: parsing \"123.9\": invalid syntax")
 }
 
-func TestMapError(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand,
-		"echo",
-		"1",
-		"abc",
-		"1234foo",
-		"4321bar",
-		"--map-string-uint32", "bar=123",
-		"--map-string-coin", "baz=100000foo",
-		"--map-string-coin", "sec=100000bar",
-	)
-	assert.DeepEqual(t, conn.lastRequest, conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
-}
-
+// TestEveything tests all the different types of flags are correctly read and as well as correctly returned
+// This tests the flag binding and the message building
 func TestEverything(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand,
+	fixture := initFixture(t)
+
+	_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1",
 		"abc",
@@ -215,6 +356,8 @@ func TestEverything(t *testing.T) {
 		"--timestamp", "2019-01-02T00:01:02Z",
 		"--a-coin", "100000foo",
 		"--an-address", "cosmos1y74p8wyy4enfhfn342njve6cjmj5c8dtl6emdk",
+		"--a-validator-address", "cosmosvaloper1tnh2q55v8wyygtt9srz5safamzdengsn9dsd7z",
+		"--a-consensus-address", "cosmosvalcons16vm0nx49eam4q0xasdnwdzsdl6ymgyjt757sgr",
 		"--bz", "c2RncXdlZndkZ3NkZw==",
 		"--page-count-total",
 		"--page-key", "MTIzNTQ4N3NnaGRhcw==",
@@ -238,35 +381,119 @@ func TestEverything(t *testing.T) {
 		"--uints", "1,2,3",
 		"--uints", "4",
 	)
-	assert.DeepEqual(t, conn.lastRequest, conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+	assert.NilError(t, err)
+
+	expectedResp := &testpb.EchoResponse{
+		Request: &testpb.EchoRequest{
+			Positional1: 1,
+			Positional2: "abc",
+			Positional3Varargs: []*basev1beta1.Coin{
+				{Amount: "123.123123124", Denom: "foo"},
+				{Amount: "4321", Denom: "bar"},
+			},
+			ABool:  true,
+			AnEnum: testpb.Enum_ENUM_ONE,
+			AMessage: &testpb.AMessage{
+				Bar: "abc",
+				Baz: -3,
+			},
+			Duration: durationpb.New(4*time.Hour + 3*time.Second),
+			U32:      27,
+			U64:      3267246890,
+			I32:      -253,
+			I64:      -234602347,
+			Str:      "def",
+			Timestamp: &timestamppb.Timestamp{
+				Seconds: 1546387262,
+			},
+			ACoin: &basev1beta1.Coin{
+				Amount: "100000",
+				Denom:  "foo",
+			},
+			AnAddress:         "cosmos1y74p8wyy4enfhfn342njve6cjmj5c8dtl6emdk",
+			AValidatorAddress: "cosmosvaloper1tnh2q55v8wyygtt9srz5safamzdengsn9dsd7z",
+			AConsensusAddress: "cosmosvalcons16vm0nx49eam4q0xasdnwdzsdl6ymgyjt757sgr",
+			Bz:                []byte("sdgqwefwdgsdg"),
+			Page: &queryv1beta1.PageRequest{
+				CountTotal: true,
+				Key:        []byte("1235487sghdas"),
+				Limit:      1000,
+				Offset:     10,
+				Reverse:    true,
+			},
+			Bools: []bool{true, false, false, true},
+			Enums: []testpb.Enum{testpb.Enum_ENUM_ONE, testpb.Enum_ENUM_FIVE, testpb.Enum_ENUM_TWO},
+			Strings: []string{
+				"abc",
+				"xyz",
+				"xyz",
+				"qrs",
+			},
+			Durations: []*durationpb.Duration{
+				durationpb.New(3 * time.Second),
+				durationpb.New(5 * time.Second),
+				durationpb.New(10 * time.Hour),
+			},
+			SomeMessages: []*testpb.AMessage{
+				{},
+				{Bar: "baz"},
+				{Baz: -1},
+			},
+			Uints: []uint32{1, 2, 3, 4},
+		},
+	}
+
+	assert.DeepEqual(t, fixture.conn.lastRequest, fixture.conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+	assert.DeepEqual(t, fixture.conn.lastResponse.(*testpb.EchoResponse), expectedResp, protocmp.Transform())
+}
+
+func TestPubKeyParsingConsensusAddress(t *testing.T) {
+	fixture := initFixture(t)
+
+	_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
+		"echo",
+		"1", "abc", "1foo",
+		"--a-consensus-address", "{\"@type\":\"/cosmos.crypto.ed25519.PubKey\",\"key\":\"j8qdbR+AlH/V6aBTCSWXRvX3JUESF2bV+SEzndBhF0o=\"}",
+		"-u", "27", // shorthand
+	)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, fixture.conn.lastRequest, fixture.conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
 }
 
 func TestJSONParsing(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand,
+	fixture := initFixture(t)
+
+	_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1", "abc", "1foo",
 		"--some-messages", `{"bar":"baz"}`,
 		"-u", "27", // shorthand
 	)
-	assert.DeepEqual(t, conn.lastRequest, conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+	assert.NilError(t, err)
+	assert.DeepEqual(t, fixture.conn.lastRequest, fixture.conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
 
-	conn = testExecCommon(t, buildModuleQueryCommand,
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1", "abc", "1foo",
 		"--some-messages", "testdata/some_message.json",
 		"-u", "27", // shorthand
 	)
-	assert.DeepEqual(t, conn.lastRequest, conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
+	assert.NilError(t, err)
+	assert.DeepEqual(t, fixture.conn.lastRequest, fixture.conn.lastResponse.(*testpb.EchoResponse).Request, protocmp.Transform())
 }
 
 func TestOptions(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand,
+	fixture := initFixture(t)
+
+	_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1", "abc", "123foo",
 		"-u", "27", // shorthand
 		"--u64", "5", // no opt default value
 	)
-	lastReq := conn.lastRequest.(*testpb.EchoRequest)
+	assert.NilError(t, err)
+
+	lastReq := fixture.conn.lastRequest.(*testpb.EchoRequest)
 	assert.Equal(t, uint32(27), lastReq.U32) // shorthand got set
 	assert.Equal(t, int32(3), lastReq.I32)   // default value got set
 	assert.Equal(t, uint64(5), lastReq.U64)  // no opt default value got set
@@ -322,87 +549,102 @@ func TestBinaryFlag(t *testing.T) {
 	}
 
 	// Run test cases
+	fixture := initFixture(t)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			conn := testExecCommon(t, buildModuleQueryCommand,
+			_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 				"echo",
-				"1", "abc", `{"denom":"foo","amount":"1"}`,
+				"1", "abc", `100foo`,
 				"--bz", tc.input,
 			)
-			errorOut := conn.errorOut.String()
-			if errorOut == "" {
-				lastReq := conn.lastRequest.(*testpb.EchoRequest)
-				assert.DeepEqual(t, tc.expected, lastReq.Bz)
+			if tc.hasError {
+				assert.ErrorContains(t, err, tc.err)
 			} else {
-				assert.Assert(t, strings.Contains(conn.errorOut.String(), tc.err))
+				assert.NilError(t, err)
+				lastReq := fixture.conn.lastRequest.(*testpb.EchoRequest)
+				assert.DeepEqual(t, tc.expected, lastReq.Bz)
 			}
 		})
 	}
 }
 
 func TestAddressValidation(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand,
+	fixture := initFixture(t)
+
+	_, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1", "abc", "1foo",
 		"--an-address", "cosmos1y74p8wyy4enfhfn342njve6cjmj5c8dtl6emdk",
 	)
-	assert.Equal(t, "", conn.errorOut.String())
+	assert.NilError(t, err)
 
-	conn = testExecCommon(t, buildModuleQueryCommand,
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1", "abc", "1foo",
-		"--an-address", "regen1y74p8wyy4enfhfn342njve6cjmj5c8dtl6emdk",
+		"--an-address", "regen1y74p8wyy4enfhfn342njve6cjmj5c8dtlqj7ule2",
 	)
-	assert.Assert(t, strings.Contains(conn.errorOut.String(), "Error: invalid argument"))
+	assert.ErrorContains(t, err, "invalid account address")
 
-	conn = testExecCommon(t, buildModuleQueryCommand,
+	_, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1", "abc", "1foo",
 		"--an-address", "cosmps1BAD_ENCODING",
 	)
-	assert.Assert(t, strings.Contains(conn.errorOut.String(), "Error: invalid argument"))
+	assert.ErrorContains(t, err, "invalid account address")
 }
 
 func TestOutputFormat(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand,
+	fixture := initFixture(t)
+
+	out, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1", "abc", "1foo",
 		"--output", "json",
 	)
-	assert.Assert(t, strings.Contains(conn.out.String(), "{"))
-	conn = testExecCommon(t, buildModuleQueryCommand,
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(out.String(), "{"))
+
+	out, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand,
 		"echo",
 		"1", "abc", "1foo",
 		"--output", "text",
 	)
-	fmt.Println(conn.out.String())
-	assert.Assert(t, strings.Contains(conn.out.String(), "  positional1: 1"))
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(out.String(), "  positional1: 1"))
 }
 
-func TestHelp(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand, "-h")
-	golden.Assert(t, conn.out.String(), "help-toplevel.golden")
+func TestHelpQuery(t *testing.T) {
+	fixture := initFixture(t)
 
-	conn = testExecCommon(t, buildModuleQueryCommand, "echo", "-h")
-	golden.Assert(t, conn.out.String(), "help-echo.golden")
+	out, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand, "-h")
+	assert.NilError(t, err)
+	golden.Assert(t, out.String(), "help-toplevel.golden")
 
-	conn = testExecCommon(t, buildModuleQueryCommand, "deprecatedecho", "echo", "-h")
-	golden.Assert(t, conn.out.String(), "help-deprecated.golden")
+	out, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand, "echo", "-h")
+	assert.NilError(t, err)
+	golden.Assert(t, out.String(), "help-echo.golden")
 
-	conn = testExecCommon(t, buildModuleQueryCommand, "skipecho", "-h")
-	golden.Assert(t, conn.out.String(), "help-skip.golden")
+	out, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand, "deprecatedecho", "echo", "-h")
+	assert.NilError(t, err)
+	golden.Assert(t, out.String(), "help-deprecated.golden")
+
+	out, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand, "skipecho", "-h")
+	assert.NilError(t, err)
+	golden.Assert(t, out.String(), "help-skip.golden")
 }
 
-func TestDeprecated(t *testing.T) {
-	conn := testExecCommon(t, buildModuleQueryCommand, "echo",
-		"1", "abc", `{}`,
-		"--deprecated-field", "foo")
-	assert.Assert(t, strings.Contains(conn.out.String(), "--deprecated-field has been deprecated"))
+func TestDeprecatedQuery(t *testing.T) {
+	fixture := initFixture(t)
 
-	conn = testExecCommon(t, buildModuleQueryCommand, "echo",
-		"1", "abc", `{}`,
-		"-s", "foo")
-	assert.Assert(t, strings.Contains(conn.out.String(), "--shorthand-deprecated-field has been deprecated"))
+	out, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand, "echo",
+		"1", "abc", "--deprecated-field", "foo")
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(out.String(), "--deprecated-field has been deprecated"))
+
+	out, err = runCmd(fixture.conn, fixture.b, buildModuleQueryCommand, "echo",
+		"1", "abc", "-s", "foo")
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(out.String(), "--shorthand-deprecated-field has been deprecated"))
 }
 
 func TestBuildCustomQueryCommand(t *testing.T) {
@@ -421,19 +663,21 @@ func TestBuildCustomQueryCommand(t *testing.T) {
 		"test": {Use: "test", Run: func(cmd *cobra.Command, args []string) {
 			customCommandCalled = true
 		}},
-	}, enhanceQuery)
+	})
 	assert.NilError(t, err)
 	cmd.SetArgs([]string{"test", "query"})
 	assert.NilError(t, cmd.Execute())
 	assert.Assert(t, customCommandCalled)
 }
 
-func TestNotFoundErrors(t *testing.T) {
-	b := &Builder{}
+func TestNotFoundErrorsQuery(t *testing.T) {
+	fixture := initFixture(t)
+	b := fixture.b
+	b.AddQueryConnFlags = nil
+	b.AddTxConnFlags = nil
 
 	buildModuleQueryCommand := func(moduleName string, cmdDescriptor *autocliv1.ServiceCommandDescriptor) (*cobra.Command, error) {
 		cmd := topLevelCmd("query", "Querying subcommands")
-
 		err := b.AddMsgServiceCommands(cmd, cmdDescriptor)
 		return cmd, err
 	}
@@ -480,28 +724,11 @@ func TestNotFoundErrors(t *testing.T) {
 	assert.ErrorContains(t, err, "can't find field baz")
 }
 
-type testClientConn struct {
-	*grpc.ClientConn
-	t            *testing.T
-	lastRequest  interface{}
-	lastResponse interface{}
-	out          *bytes.Buffer
-	errorOut     *bytes.Buffer
-}
+func TestDurationMarshal(t *testing.T) {
+	fixture := initFixture(t)
 
-func (t *testClientConn) Invoke(ctx context.Context, method string, args, reply interface{}, opts ...grpc.CallOption) error {
-	err := t.ClientConn.Invoke(ctx, method, args, reply, opts...)
-	t.lastRequest = args
-	t.lastResponse = reply
-	return err
+	out, err := runCmd(fixture.conn, fixture.b, buildModuleQueryCommand, "echo", "1", "abc", "--duration", "1s")
+	assert.NilError(t, err)
+	fmt.Println(out.String())
+	assert.Assert(t, strings.Contains(out.String(), "duration: 1s"))
 }
-
-type testEchoServer struct {
-	testpb.UnimplementedQueryServer
-}
-
-func (t testEchoServer) Echo(_ context.Context, request *testpb.EchoRequest) (*testpb.EchoResponse, error) {
-	return &testpb.EchoResponse{Request: request}, nil
-}
-
-var _ testpb.QueryServer = testEchoServer{}

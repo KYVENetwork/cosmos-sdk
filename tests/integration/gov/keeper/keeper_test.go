@@ -1,14 +1,20 @@
 package keeper_test
 
 import (
+	"cosmossdk.io/math"
+	govtestutil "github.com/cosmos/cosmos-sdk/x/gov/testutil"
+	"github.com/golang/mock/gomock"
 	"testing"
 
-	"cosmossdk.io/log"
-	storetypes "cosmossdk.io/store/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"gotest.tools/v3/assert"
 
+	"cosmossdk.io/core/appmodule"
+	"cosmossdk.io/log"
+	storetypes "cosmossdk.io/store/types"
+
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil/integration"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -71,6 +77,7 @@ func initFixture(t testing.TB) *fixture {
 		runtime.NewKVStoreService(keys[authtypes.StoreKey]),
 		authtypes.ProtoBaseAccount,
 		maccPerms,
+		addresscodec.NewBech32Codec(sdk.Bech32MainPrefix),
 		sdk.Bech32MainPrefix,
 		authority.String(),
 	)
@@ -87,7 +94,7 @@ func initFixture(t testing.TB) *fixture {
 		log.NewNopLogger(),
 	)
 
-	stakingKeeper := stakingkeeper.NewKeeper(cdc, keys[stakingtypes.StoreKey], accountKeeper, bankKeeper, authority.String())
+	stakingKeeper := stakingkeeper.NewKeeper(cdc, runtime.NewKVStoreService(keys[stakingtypes.StoreKey]), accountKeeper, bankKeeper, authority.String(), addresscodec.NewBech32Codec(sdk.Bech32PrefixValAddr), addresscodec.NewBech32Codec(sdk.Bech32PrefixConsAddr))
 
 	// set default staking params
 	stakingKeeper.SetParams(newCtx, stakingtypes.DefaultParams())
@@ -101,12 +108,33 @@ func initFixture(t testing.TB) *fixture {
 	router := baseapp.NewMsgServiceRouter()
 	router.SetInterfaceRegistry(cdc.InterfaceRegistry())
 
+	ctrl := gomock.NewController(t)
+	protocolStakingKeeper := govtestutil.NewMockProtocolStakingKeeper(ctrl)
+
+	// We do not need to mock the protocol staking keeper as we do not use test it
+	protocolStakingKeeper.
+		EXPECT().
+		TotalBondedTokens(gomock.Any()).
+		Return(math.NewInt(0)).
+		AnyTimes()
+	protocolStakingKeeper.
+		EXPECT().
+		GetActiveValidators(gomock.Any()).
+		Return([]interface{}{}).
+		AnyTimes()
+	protocolStakingKeeper.
+		EXPECT().
+		GetDelegations(gomock.Any(), gomock.Any()).
+		Return("", math.LegacyZeroDec()).
+		AnyTimes()
+
 	govKeeper := keeper.NewKeeper(
 		cdc,
 		runtime.NewKVStoreService(keys[types.StoreKey]),
 		accountKeeper,
 		bankKeeper,
 		stakingKeeper,
+		protocolStakingKeeper,
 		distrKeeper,
 		router,
 		types.DefaultConfig(),
@@ -126,7 +154,13 @@ func initFixture(t testing.TB) *fixture {
 	distrModule := distribution.NewAppModule(cdc, distrKeeper, accountKeeper, bankKeeper, stakingKeeper, nil)
 	govModule := gov.NewAppModule(cdc, govKeeper, accountKeeper, bankKeeper, nil)
 
-	integrationApp := integration.NewIntegrationApp(newCtx, logger, keys, cdc, authModule, bankModule, stakingModule, distrModule, govModule)
+	integrationApp := integration.NewIntegrationApp(newCtx, logger, keys, cdc, map[string]appmodule.AppModule{
+		authtypes.ModuleName:    authModule,
+		banktypes.ModuleName:    bankModule,
+		distrtypes.ModuleName:   distrModule,
+		stakingtypes.ModuleName: stakingModule,
+		types.ModuleName:        govModule,
+	})
 
 	sdkCtx := sdk.UnwrapSDKContext(integrationApp.Context())
 

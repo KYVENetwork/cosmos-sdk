@@ -8,9 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/mock/gomock"
-
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/golang/mock/gomock"
 
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
@@ -662,6 +661,15 @@ func (s *TestSuite) TestUpdateGroupAdmin() {
 				CreatedAt:   s.blockTime,
 			},
 		},
+		"with invalid new admin address": {
+			req: &group.MsgUpdateGroupAdmin{
+				GroupId:  groupID,
+				Admin:    oldAdmin,
+				NewAdmin: "%s",
+			},
+			expErr:    true,
+			expErrMsg: "new admin address",
+		},
 	}
 	for msg, spec := range specs {
 		spec := spec
@@ -1216,6 +1224,23 @@ func (s *TestSuite) TestUpdateGroupPolicyAdmin() {
 			},
 			expErr: false,
 		},
+		"with invalid new admin address": {
+			req: &group.MsgUpdateGroupPolicyAdmin{
+				Admin:              admin.String(),
+				GroupPolicyAddress: groupPolicyAddr,
+				NewAdmin:           "%s",
+			},
+			expGroupPolicy: &group.GroupPolicyInfo{
+				Admin:          admin.String(),
+				Address:        groupPolicyAddr,
+				GroupId:        myGroupID,
+				Version:        2,
+				DecisionPolicy: nil,
+				CreatedAt:      s.blockTime,
+			},
+			expErr:    true,
+			expErrMsg: "new admin address",
+		},
 	}
 	for msg, spec := range specs {
 		spec := spec
@@ -1738,6 +1763,17 @@ func (s *TestSuite) TestSubmitProposal() {
 				GroupPolicyAddress: accountAddr.String(),
 				Proposers:          []string{addr2.String()},
 				Metadata:           strings.Repeat("a", 256),
+			},
+			expErr:    true,
+			expErrMsg: "limit exceeded",
+			postRun:   func(sdkCtx sdk.Context) {},
+		},
+		"summary too long": {
+			req: &group.MsgSubmitProposal{
+				GroupPolicyAddress: accountAddr.String(),
+				Proposers:          []string{addr2.String()},
+				Metadata:           "{\"title\":\"title\",\"summary\":\"description\"}",
+				Summary:            strings.Repeat("a", 256*40),
 			},
 			expErr:    true,
 			expErrMsg: "limit exceeded",
