@@ -108,10 +108,22 @@ func initFixture(t testing.TB) *fixture {
 	router := baseapp.NewMsgServiceRouter()
 	router.SetInterfaceRegistry(cdc.InterfaceRegistry())
 
+	govKeeper := keeper.NewKeeper(
+		cdc,
+		runtime.NewKVStoreService(keys[types.StoreKey]),
+		accountKeeper,
+		bankKeeper,
+		stakingKeeper,
+		distrKeeper,
+		router,
+		types.DefaultConfig(),
+		authority.String(),
+	)
+
 	ctrl := gomock.NewController(t)
 	protocolStakingKeeper := govtestutil.NewMockProtocolStakingKeeper(ctrl)
 
-	// We do not need to mock the protocol staking keeper as we do not use test it
+	// We just use stubs because we don't need to test the protocol staking keeper.
 	protocolStakingKeeper.
 		EXPECT().
 		TotalBondedTokens(gomock.Any()).
@@ -125,21 +137,11 @@ func initFixture(t testing.TB) *fixture {
 	protocolStakingKeeper.
 		EXPECT().
 		GetDelegations(gomock.Any(), gomock.Any()).
-		Return("", math.LegacyZeroDec()).
+		Return([]string{}, math.LegacyZeroDec()).
 		AnyTimes()
 
-	govKeeper := keeper.NewKeeper(
-		cdc,
-		runtime.NewKVStoreService(keys[types.StoreKey]),
-		accountKeeper,
-		bankKeeper,
-		stakingKeeper,
-		protocolStakingKeeper,
-		distrKeeper,
-		router,
-		types.DefaultConfig(),
-		authority.String(),
-	)
+	govKeeper.SetProtocolStakingKeeper(protocolStakingKeeper)
+
 	err := govKeeper.ProposalID.Set(newCtx, 1)
 	assert.NilError(t, err)
 	govRouter := v1beta1.NewRouter()

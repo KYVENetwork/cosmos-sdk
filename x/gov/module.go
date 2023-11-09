@@ -163,7 +163,7 @@ func init() {
 	appmodule.Register(
 		&modulev1.Module{},
 		appmodule.Provide(ProvideModule, ProvideKeyTable),
-		appmodule.Invoke(InvokeAddRoutes, InvokeSetHooks))
+		appmodule.Invoke(InvokeAddRoutes, InvokeSetHooks, InvokeSetProtocolStakingKeeper))
 }
 
 type ModuleInputs struct {
@@ -210,7 +210,6 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.AccountKeeper,
 		in.BankKeeper,
 		in.StakingKeeper,
-		nil,
 		in.DistributionKeeper,
 		in.MsgServiceRouter,
 		defaultConfig,
@@ -265,6 +264,14 @@ func InvokeSetHooks(keeper *keeper.Keeper, govHooks map[string]govtypes.GovHooks
 	}
 
 	keeper.SetHooks(multiHooks)
+	return nil
+}
+
+func InvokeSetProtocolStakingKeeper(keeper *keeper.Keeper, protocolStakingKeeper govtypes.ProtocolStakingKeeper) error {
+	if keeper == nil || protocolStakingKeeper == nil {
+		return nil
+	}
+	keeper.SetProtocolStakingKeeper(protocolStakingKeeper)
 	return nil
 }
 
