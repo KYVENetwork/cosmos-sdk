@@ -17,7 +17,7 @@ type StakingKeeper interface {
 
 // ProtocolStakingKeeper defines the expected KYVE Protocol staking keeper
 type ProtocolStakingKeeper interface {
-	TotalBondedTokens(ctx sdk.Context) math.Int
+	TotalBondedTokens(ctx context.Context) math.Int
 }
 
 // AccountKeeper defines the contract required for account APIs.
