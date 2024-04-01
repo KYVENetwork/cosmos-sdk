@@ -206,9 +206,10 @@ type ModuleInputs struct {
 	// LegacySubspace is used solely for migration of x/params managed parameters
 	LegacySubspace exported.Subspace `optional:"true"`
 
-	AccountKeeper types.AccountKeeper
-	BankKeeper    types.BankKeeper
-	StakingKeeper types.StakingKeeper
+	AccountKeeper         types.AccountKeeper
+	BankKeeper            types.BankKeeper
+	StakingKeeper         types.StakingKeeper
+	ProtocolStakingKeeper types.ProtocolStakingKeeper
 }
 
 type ModuleOutputs struct {
@@ -234,9 +235,9 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.Cdc,
 		in.StoreService,
 		in.StakingKeeper,
-		nil,
 		in.AccountKeeper,
 		in.BankKeeper,
+		in.ProtocolStakingKeeper,
 		feeCollectorName,
 		authority.String(),
 	)
