@@ -54,7 +54,7 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 		for _, rawVal := range keeper.protocolStakingKeeper.GetActiveValidators(ctx) {
 			// NOTE: We have to typecast to avoid creating import cycles when defining the function interfaces.
 			if val, ok := rawVal.(v1.ValidatorGovInfo); ok {
-				address := sdk.AccAddress(val.Address).String()
+				address := val.Address.String()
 				currValidators[address] = val
 			}
 		}
@@ -75,10 +75,11 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 			val.Vote = vote.Options
 			currValidators[valAddrStr] = val
 		}
+
 		// Check if the voter is a KYVE Protocol validator.
-		if val, ok := currValidators[string(voter)]; ok {
+		if val, ok := currValidators[valAddrStr]; ok {
 			val.Vote = vote.Options
-			currValidators[string(voter)] = val
+			currValidators[valAddrStr] = val
 		}
 
 		// iterate over all delegations from voter, deduct from any delegated-to validators
@@ -109,7 +110,7 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 		}
 
 		if keeper.protocolStakingKeeper != nil {
-			validators, amounts := keeper.protocolStakingKeeper.GetDelegations(ctx, string(voter))
+			validators, amounts := keeper.protocolStakingKeeper.GetDelegations(ctx, vote.Voter)
 			for idx, address := range validators {
 				if val, ok := currValidators[address]; ok {
 					val.DelegatorDeductions = val.DelegatorDeductions.Add(amounts[idx])
