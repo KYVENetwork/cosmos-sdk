@@ -54,7 +54,7 @@ func (keeper Keeper) Tally(ctx context.Context, proposal v1.Proposal) (passes, b
 		for _, rawVal := range keeper.protocolStakingKeeper.GetActiveValidators(ctx) {
 			// NOTE: We have to typecast to avoid creating import cycles when defining the function interfaces.
 			if val, ok := rawVal.(v1.ValidatorGovInfo); ok {
-				address := val.Address.String()
+				address := sdk.AccAddress(val.Address).String()
 				currValidators[address] = val
 			}
 		}
