@@ -22,6 +22,7 @@ func TestItCreatesModuleAccountOnInitBlock(t *testing.T) {
 		depinject.Configs(
 			testutil.AppConfig,
 			depinject.Supply(log.NewNopLogger()),
+			depinject.Supply(&testutil.MockProtocolStakingKeeper{}),
 		), &accountKeeper)
 	require.NoError(t, err)
 
