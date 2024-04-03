@@ -79,7 +79,6 @@ func setupGovKeeper(t *testing.T) (
 	bankKeeper := govtestutil.NewMockBankKeeper(ctrl)
 	stakingKeeper := govtestutil.NewMockStakingKeeper(ctrl)
 	distributionKeeper := govtestutil.NewMockDistributionKeeper(ctrl)
-	protocolStakingKeeper := govtestutil.NewMockProtocolStakingKeeper(ctrl)
 
 	acctKeeper.EXPECT().GetModuleAddress(types.ModuleName).Return(govAcct).AnyTimes()
 	acctKeeper.EXPECT().GetModuleAddress(disttypes.ModuleName).Return(distAcct).AnyTimes()
@@ -100,8 +99,6 @@ func setupGovKeeper(t *testing.T) (
 	// Gov keeper initializations
 
 	govKeeper := keeper.NewKeeper(encCfg.Codec, storeService, acctKeeper, bankKeeper, stakingKeeper, distributionKeeper, msr, types.DefaultConfig(), govAcct.String())
-	govKeeper.SetProtocolStakingKeeper(protocolStakingKeeper)
-
 	require.NoError(t, govKeeper.ProposalID.Set(ctx, 1))
 	govRouter := v1beta1.NewRouter() // Also register legacy gov handlers to test them too.
 	govRouter.AddRoute(types.RouterKey, v1beta1.ProposalHandler)

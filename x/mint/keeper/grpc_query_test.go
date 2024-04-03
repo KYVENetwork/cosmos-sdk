@@ -50,9 +50,9 @@ func (suite *MintTestSuite) SetupTest() {
 		encCfg.Codec,
 		storeService,
 		stakingKeeper,
-		protocolStakingKeeper,
 		accountKeeper,
 		bankKeeper,
+		protocolStakingKeeper,
 		authtypes.FeeCollectorName,
 		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 	)

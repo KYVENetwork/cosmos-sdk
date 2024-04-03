@@ -54,9 +54,9 @@ func (s *IntegrationTestSuite) SetupTest() {
 		encCfg.Codec,
 		storeService,
 		stakingKeeper,
-		nil,
 		accountKeeper,
 		bankKeeper,
+		nil,
 		authtypes.FeeCollectorName,
 		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 	)
@@ -81,7 +81,8 @@ func (s *IntegrationTestSuite) TestAliasFunctions() {
 	s.Require().Equal(tokenSupply, stakingTokenSupply)
 
 	bondedRatio := math.LegacyNewDecWithPrec(15, 2)
-	s.stakingKeeper.EXPECT().BondedRatio(s.ctx).Return(bondedRatio, nil)
+	s.stakingKeeper.EXPECT().StakingTokenSupply(s.ctx).Return(stakingTokenSupply, nil)
+	s.stakingKeeper.EXPECT().TotalBondedTokens(s.ctx).Return(math.NewInt(15000000000), nil)
 	ratio, err := s.mintKeeper.BondedRatio(s.ctx)
 	s.Require().NoError(err)
 	s.Require().Equal(ratio, bondedRatio)

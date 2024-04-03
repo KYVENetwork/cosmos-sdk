@@ -105,7 +105,7 @@ func (m *MockProtocolStakingKeeper) EXPECT() *MockProtocolStakingKeeperMockRecor
 }
 
 // TotalBondedTokens mocks base method.
-func (m *MockProtocolStakingKeeper) TotalBondedTokens(ctx types.Context) math.Int {
+func (m *MockProtocolStakingKeeper) TotalBondedTokens(ctx context.Context) math.Int {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "TotalBondedTokens", ctx)
 	ret0, _ := ret[0].(math.Int)
