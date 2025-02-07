@@ -22,6 +22,9 @@ type Keeper struct {
 	authKeeper    types.AccountKeeper
 	bankKeeper    types.BankKeeper
 	stakingKeeper types.StakingKeeper
+
+	multiCoinRewardsKeeper types.MultiCoinRewardsKeeper
+
 	// the address capable of executing a MsgUpdateParams message. Typically, this
 	// should be the x/gov module account.
 	authority string
@@ -33,19 +36,23 @@ type Keeper struct {
 	feeCollectorName string // name of the FeeCollector ModuleAccount
 }
 
+func (k *Keeper) SetMultiCoinRewardsKeeper(multiCoinRewardsKeeper types.MultiCoinRewardsKeeper) {
+	k.multiCoinRewardsKeeper = multiCoinRewardsKeeper
+}
+
 // NewKeeper creates a new distribution Keeper instance
 func NewKeeper(
 	cdc codec.BinaryCodec, storeService store.KVStoreService,
 	ak types.AccountKeeper, bk types.BankKeeper, sk types.StakingKeeper,
 	feeCollectorName, authority string,
-) Keeper {
+) *Keeper {
 	// ensure distribution module account is set
 	if addr := ak.GetModuleAddress(types.ModuleName); addr == nil {
 		panic(fmt.Sprintf("%s module account has not been set", types.ModuleName))
 	}
 
 	sb := collections.NewSchemaBuilder(storeService)
-	k := Keeper{
+	k := &Keeper{
 		storeService:     storeService,
 		cdc:              cdc,
 		authKeeper:       ak,

@@ -97,7 +97,7 @@ func (AppModuleBasic) RegisterInterfaces(registry cdctypes.InterfaceRegistry) {
 type AppModule struct {
 	AppModuleBasic
 
-	keeper        keeper.Keeper
+	keeper        *keeper.Keeper
 	accountKeeper types.AccountKeeper
 	bankKeeper    types.BankKeeper
 	stakingKeeper types.StakingKeeper
@@ -108,7 +108,7 @@ type AppModule struct {
 
 // NewAppModule creates a new AppModule object
 func NewAppModule(
-	cdc codec.Codec, keeper keeper.Keeper, accountKeeper types.AccountKeeper,
+	cdc codec.Codec, keeper *keeper.Keeper, accountKeeper types.AccountKeeper,
 	bankKeeper types.BankKeeper, stakingKeeper types.StakingKeeper, ss exported.Subspace,
 ) AppModule {
 	return AppModule{
@@ -129,7 +129,7 @@ func (am AppModule) IsAppModule() {}
 
 // RegisterInvariants registers the distribution module invariants.
 func (am AppModule) RegisterInvariants(ir sdk.InvariantRegistry) {
-	keeper.RegisterInvariants(ir, am.keeper)
+	keeper.RegisterInvariants(ir, *am.keeper)
 }
 
 // RegisterServices registers module services.
@@ -137,7 +137,7 @@ func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQuerier(am.keeper))
 
-	m := keeper.NewMigrator(am.keeper, am.legacySubspace)
+	m := keeper.NewMigrator(*am.keeper, am.legacySubspace)
 	if err := cfg.RegisterMigration(types.ModuleName, 1, m.Migrate1to2); err != nil {
 		panic(fmt.Sprintf("failed to migrate x/%s from version 1 to 2: %v", types.ModuleName, err))
 	}
@@ -168,7 +168,7 @@ func (AppModule) ConsensusVersion() uint64 { return ConsensusVersion }
 // BeginBlock returns the begin blocker for the distribution module.
 func (am AppModule) BeginBlock(ctx context.Context) error {
 	c := sdk.UnwrapSDKContext(ctx)
-	return BeginBlocker(c, am.keeper)
+	return BeginBlocker(c, *am.keeper)
 }
 
 // AppModuleSimulation functions
@@ -192,7 +192,7 @@ func (am AppModule) RegisterStoreDecoder(sdr simtypes.StoreDecoderRegistry) {
 func (am AppModule) WeightedOperations(simState module.SimulationState) []simtypes.WeightedOperation {
 	return simulation.WeightedOperations(
 		simState.AppParams, simState.Cdc, simState.TxConfig,
-		am.accountKeeper, am.bankKeeper, am.keeper, am.stakingKeeper,
+		am.accountKeeper, am.bankKeeper, *am.keeper, am.stakingKeeper,
 	)
 }
 
@@ -203,6 +203,7 @@ func (am AppModule) WeightedOperations(simState module.SimulationState) []simtyp
 func init() {
 	appmodule.Register(&modulev1.Module{},
 		appmodule.Provide(ProvideModule),
+		appmodule.Invoke(InvokeMultiCoinRewardsKeeper),
 	)
 }
 
@@ -221,10 +222,18 @@ type ModuleInputs struct {
 	LegacySubspace exported.Subspace `optional:"true"`
 }
 
+func InvokeMultiCoinRewardsKeeper(keeper *keeper.Keeper, multiCoinRewardsKeeper types.MultiCoinRewardsKeeper) error {
+	if keeper == nil || multiCoinRewardsKeeper == nil {
+		return nil
+	}
+	keeper.SetMultiCoinRewardsKeeper(multiCoinRewardsKeeper)
+	return nil
+}
+
 type ModuleOutputs struct {
 	depinject.Out
 
-	DistrKeeper keeper.Keeper
+	DistrKeeper *keeper.Keeper
 	Module      appmodule.AppModule
 	Hooks       staking.StakingHooksWrapper
 }
