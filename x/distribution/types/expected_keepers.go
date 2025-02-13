@@ -10,7 +10,7 @@ import (
 )
 
 type MultiCoinRewardsKeeper interface {
-	HandleMultiCoinRewards(goCtx context.Context, withdrawAddress sdk.AccAddress, coins sdk.Coins) sdk.Coins
+	HandleMultiCoinRewards(goCtx context.Context, withdrawAddress sdk.AccAddress, coins sdk.Coins) (sdk.Coins, error)
 }
 
 // AccountKeeper defines the expected account keeper used for simulations (noalias)

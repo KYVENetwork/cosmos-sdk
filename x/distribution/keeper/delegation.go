@@ -254,7 +254,10 @@ func (k Keeper) withdrawDelegationRewards(ctx context.Context, val stakingtypes.
 		}
 
 		// Checks the rewards for non-compliant multi coins, which are handled by the compliance module
-		finalRewards = k.multiCoinRewardsKeeper.HandleMultiCoinRewards(ctx, withdrawAddr, finalRewards)
+		finalRewards, err = k.multiCoinRewardsKeeper.HandleMultiCoinRewards(ctx, withdrawAddr, finalRewards)
+		if err != nil {
+			return nil, err
+		}
 
 		err = k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, withdrawAddr, finalRewards)
 		if err != nil {
