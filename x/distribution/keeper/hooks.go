@@ -12,13 +12,13 @@ import (
 
 // Wrapper struct
 type Hooks struct {
-	k Keeper
+	k *Keeper
 }
 
 var _ stakingtypes.StakingHooks = Hooks{}
 
 // Create new distribution hooks
-func (k Keeper) Hooks() Hooks {
+func (k *Keeper) Hooks() Hooks {
 	return Hooks{k}
 }
 
